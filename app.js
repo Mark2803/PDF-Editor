@@ -4,19 +4,17 @@
   const Core = window.LabelCore;
   const $ = (id) => document.getElementById(id);
 
-  // Раскладки для этикетки 75×120 мм. Свободное место справа от рисунка: x 39–73 мм, y 2–38 мм.
-  const PRESETS = {
-    max: { code: { x: 39.5, y: 2, w: 33.5, h: 36.3 }, info: { x: 2, y: 2, w: 15.5, h: 10.5 } },
-    mockup: { code: { x: 39.5, y: 9.5, w: 34, h: 28.8 }, info: { x: 30.5, y: 1.5, w: 43, h: 7.5 } },
+  // Заводская раскладка этикетки 75×120 мм: справа от рисунка сверху строка «артикул дата номер»,
+  // под ней DataMatrix. Свою раскладку можно сделать штатной кнопкой «Сделать раскладку штатной».
+  const FACTORY_ZONES = {
+    code: { x: 39.5, y: 8.5, w: 33.5, h: 30 },
+    info: { x: 39.5, y: 2, w: 33.5, h: 6 },
   };
-  const DEFAULT_ZONES = {
-    code: Object.assign({}, PRESETS.max.code),
-    info: Object.assign({}, PRESETS.max.info),
-    codeInfo: { x: 1.5, y: 1.5, w: 32, h: 12 },
-  };
-  const DEFAULT_STYLE = { prefixColor: '#000000', numberColor: '#000000', numberScale: 1.7, alignLabel: 'left', codeTextPct: 70, zonePreset: 'max', paperW: 20, paperH: 30, paperMargin: 1.5 };
-  // старые значения по умолчанию (первая версия) — для автоматического обновления сохранённых товаров
-  const OLD_ZONES = { code: { x: 49, y: 13.5, w: 23, h: 23.5 }, info: { x: 33, y: 1.5, w: 39, h: 9 } };
+  // Размер артикула и даты — как основной текст этикетки (~8,5 pt), номер — вдвое крупнее
+  const FACTORY_STYLE = { prefixColor: '#000000', numberColor: '#000000', prefixPt: 8.5, numberPt: 17, alignLabel: 'left', codeTextPct: 70, paperW: 20, paperH: 30, paperMargin: 1.5 };
+  // Штатные значения (заводские или сохранённые пользователем) — заполняются при запуске
+  let DEFAULT_ZONES = JSON.parse(JSON.stringify(FACTORY_ZONES));
+  let DEFAULT_STYLE = Object.assign({}, FACTORY_STYLE);
 
   const state = {
     profiles: new Map(),
@@ -100,21 +98,21 @@
     return {
       prefixColor: $('colPrefix').value,
       numberColor: $('colNumber').value,
-      numberScale: Math.max(1, parseFloat($('numScale').value) || 1.7),
+      prefixPt: Math.min(40, Math.max(4, parseFloat($('prefixPt').value) || 8.5)),
+      numberPt: Math.min(60, Math.max(4, parseFloat($('numberPt').value) || 17)),
       alignLabel: $('alignLabel').value,
       paperW: Math.max(10, parseFloat($('paperW').value) || 20),
       paperH: Math.max(10, parseFloat($('paperH').value) || 30),
       paperMargin: Math.min(5, Math.max(0, parseFloat($('paperMargin').value) || 0)),
       codeTextPct: Math.min(100, Math.max(30, parseFloat($('codeTextPct').value) || 70)),
-      zonePreset: $('zonePreset').value,
     };
   }
   function writeStyle(st) {
     const s = Object.assign({}, DEFAULT_STYLE, st || {});
     $('colPrefix').value = s.prefixColor; $('colNumber').value = s.numberColor;
-    $('numScale').value = s.numberScale; $('alignLabel').value = s.alignLabel;
+    $('prefixPt').value = s.prefixPt; $('numberPt').value = s.numberPt; $('alignLabel').value = s.alignLabel;
     $('paperW').value = s.paperW; $('paperH').value = s.paperH; $('paperMargin').value = s.paperMargin;
-    $('codeTextPct').value = s.codeTextPct; $('zonePreset').value = s.zonePreset || 'custom';
+    $('codeTextPct').value = s.codeTextPct;
   }
   const article = () => $('article').value.trim();
   const startNum = () => Math.max(1, parseInt($('startNum').value, 10) || 1);
@@ -160,26 +158,27 @@
     const p = Object.assign(currentProfileData(), extra || {});
     await idbPut('profiles', p);
     state.profiles.set(a, p);
+    state.loadedArticle = a;
     refreshArticleList();
     updateProfileStatus();
     return p;
   }
 
-  /** Обновить товары, сохранённые в первой версии: цветной текст -> чёрный, маленький код -> крупный */
+  /** Обновить товары, сохранённые в прежних версиях: цвет -> чёрный, старые зоны и размеры -> штатные */
   function migrateProfile(p) {
     const st = Object.assign({}, p.style || {});
     if (st.prefixColor === '#2b3fbf') st.prefixColor = '#000000';
     if (st.numberColor === '#1e9e3e') st.numberColor = '#000000';
-    const z = JSON.parse(JSON.stringify(p.zones || {}));
-    const same = (a, b) => a && b && ['x', 'y', 'w', 'h'].every((k) => Math.abs(a[k] - b[k]) < 0.01);
-    if (same(z.code, OLD_ZONES.code) && same(z.info, OLD_ZONES.info)) { z.code = Object.assign({}, PRESETS.max.code); z.info = Object.assign({}, PRESETS.max.info); st.zonePreset = 'max'; }
-    if (!st.zonePreset) st.zonePreset = 'custom';
-    if (!st.codeTextPct) st.codeTextPct = 70;
-    return Object.assign({}, p, { style: st, zones: z });
+    let z = JSON.parse(JSON.stringify(p.zones || {}));
+    // до 25.11 размер текста подгонялся под рамку — переводим на штатную раскладку с размерами в pt
+    if (!st.prefixPt) { z = JSON.parse(JSON.stringify(DEFAULT_ZONES)); st.prefixPt = DEFAULT_STYLE.prefixPt; st.numberPt = DEFAULT_STYLE.numberPt; }
+    delete st.numberScale; delete st.zonePreset; delete st.layoutCode;
+    return Object.assign({}, p, { style: Object.assign({}, DEFAULT_STYLE, st), zones: z });
   }
 
   function loadProfile(p) {
     p = migrateProfile(p);
+    state.loadedArticle = p.article;
     $('productName').value = p.name || '';
     state.zones = Object.assign(JSON.parse(JSON.stringify(DEFAULT_ZONES)), JSON.parse(JSON.stringify(p.zones || {})));
     writeZonesToForm();
@@ -208,7 +207,8 @@
   function onArticleChanged() {
     const a = article();
     const p = state.profiles.get(a);
-    if (p) loadProfile(p);
+    // загружаем сохранённый товар только при переходе на ДРУГОЙ товар, чтобы не затереть только что введённое
+    if (p && state.loadedArticle !== a) loadProfile(p);
     updateProfileStatus();
     checkArticleChars();
     updateDerived();
@@ -366,8 +366,8 @@
       article: article() || 'artikul',
       dateIso: $('packDate').value,
       start: startNum(),
-      labelStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: st.alignLabel, layout: 'auto', codeTextScale: st.codeTextPct / 100 },
-      codeStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: 'center', codeTextScale: st.codeTextPct / 100 },
+      labelStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, prefixPt: st.prefixPt, numberPt: st.numberPt, align: st.alignLabel, layout: 'auto', codeTextScale: st.codeTextPct / 100 },
+      codeStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: Math.max(1, st.numberPt / st.prefixPt), align: 'center', codeTextScale: st.codeTextPct / 100 },
       paper: { w: st.paperW, h: st.paperH, margin: st.paperMargin },
     }, extra || {});
   }
@@ -450,14 +450,17 @@
       setProgress(1);
 
       const base = safeFileName(`${Core.safeText(o.article)}_${Core.formatDate(o.dateIso)}_${o.start}-${end}`);
-      const link = (bytes, type, name, text) => {
-        const u = URL.createObjectURL(new Blob([bytes], { type }));
-        return `<a href="${u}" download="${esc(name)}">⬇ ${text}</a>`;
-      };
-      $('results').innerHTML = `<div class="ok">Готово: ${n} этикеток и ${n} кодов, номера ${o.start} – ${end}.</div>`
-        + link(labels, 'application/pdf', `${base}_этикетки.pdf`, `Этикетки (${n} стр.)`)
-        + link(codes, 'application/pdf', `${base}_коды.pdf`, `Коды для внешней упаковки (${n} стр.)`)
-        + link(csv, 'text/csv;charset=utf-8', `${base}_журнал.csv`, 'Журнал: номер ↔ код (CSV)');
+      const files = [
+        { name: `${base}_этикетки.pdf`, bytes: labels, type: 'application/pdf', text: `Этикетки (${n} стр.)` },
+        { name: `${base}_коды.pdf`, bytes: codes, type: 'application/pdf', text: `Коды для внешней упаковки (${n} стр.)` },
+        { name: `${base}_журнал.csv`, bytes: new TextEncoder().encode(csv), type: 'text/csv;charset=utf-8', text: 'Журнал: номер ↔ код (Excel/CSV)' },
+      ];
+      const url = (f) => URL.createObjectURL(new Blob([f.bytes], { type: f.type }));
+      const zipUrl = URL.createObjectURL(new Blob([makeZip(files)], { type: 'application/zip' }));
+      $('results').innerHTML = `<div class="ok">Готово: ${n} этикеток и ${n} кодов, номера ${o.start} – ${end}. Скачайте файлы:</div>`
+        + `<a class="dl all" href="${zipUrl}" download="${esc(base)}.zip">⬇ Скачать всё сразу (ZIP)</a>`
+        + files.map((f) => `<a class="dl" href="${url(f)}" download="${esc(f.name)}">⬇ ${f.text}</a>`).join('');
+      $('results').scrollIntoView({ behavior: 'smooth', block: 'center' });
 
       // запоминаем использованные коды и последний номер
       const ts = Date.now();
@@ -510,6 +513,49 @@
       alert(`Восстановлено товаров: ${profiles.length}, использованных кодов: ${(data.used || []).length}`);
       onArticleChanged();
     } catch (e) { alert('Не удалось восстановить: ' + e.message); }
+  }
+
+  let autosaveTimer = null;
+  function scheduleProfileAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(async () => {
+      const a = article();
+      if (a && state.profiles.has(a) && state.loadedArticle === a) { await saveProfile(); $('profileStatus').textContent = 'сохранён (раскладка запомнена)'; }
+    }, 600);
+  }
+
+  // ZIP без сжатия (PDF и так сжаты) — чтобы скачать все файлы одним нажатием
+  const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+  function makeZip(files) {
+    const enc = new TextEncoder(); const parts = []; const central = []; let offset = 0;
+    const d = new Date();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    for (const f of files) {
+      const name = enc.encode(f.name); const data = f.bytes instanceof Uint8Array ? f.bytes : new Uint8Array(f.bytes);
+      const crc = crc32(data);
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+      lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true); lh.setUint32(14, crc, true);
+      lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+      parts.push(new Uint8Array(lh.buffer), name, data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+      ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true);
+      ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+      ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const cdSize = central.reduce((s2, p) => s2 + p.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    const all = parts.concat(central, [new Uint8Array(end.buffer)]);
+    const out = new Uint8Array(all.reduce((s2, p) => s2 + p.length, 0));
+    let pos = 0; for (const p of all) { out.set(p, pos); pos += p.length; }
+    return out;
   }
 
   function checkSummaryFor(a) {
@@ -728,6 +774,11 @@
 
   async function init() {
     if (!(await checkAccess())) return;
+    try {
+      const d = (await idbGetAll('meta')).find((m) => m.key === 'defaults');
+      if (d && d.zones && d.style) { DEFAULT_ZONES = d.zones; DEFAULT_STYLE = Object.assign({}, FACTORY_STYLE, d.style); }
+    } catch (e) { /* нет сохранённых штатных */ }
+    state.zones = JSON.parse(JSON.stringify(DEFAULT_ZONES));
     writeZonesToForm();
     writeStyle(DEFAULT_STYLE);
     $('packDate').value = todayIso();
@@ -757,14 +808,10 @@
       if (state.template && state.template.kind !== 'pdf') { state.template.widthMm = parseFloat($('tplW').value) || 75; state.template.heightMm = parseFloat($('tplH').value) || 120; showTemplateInfo(); }
       schedulePreview();
     }));
-    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #numScale, #alignLabel, #showFrames, #codeTextPct, #paperW, #paperH, #paperMargin')
+    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #prefixPt, #numberPt, #alignLabel, #showFrames, #codeTextPct, #paperW, #paperH, #paperMargin')
       .forEach((el) => el.addEventListener('input', schedulePreview));
-    document.querySelectorAll('.zone input').forEach((el) => el.addEventListener('input', () => { $('zonePreset').value = 'custom'; }));
-    $('zonePreset').addEventListener('change', () => {
-      const pr = PRESETS[$('zonePreset').value];
-      if (pr) { state.zones.code = Object.assign({}, pr.code); state.zones.info = Object.assign({}, pr.info); writeZonesToForm(); }
-      schedulePreview();
-    });
+    // изменения раскладки сразу запоминаются в сохранённом товаре
+    document.querySelectorAll('details.advanced input, details.advanced select').forEach((el) => el.addEventListener('input', scheduleProfileAutosave));
     $('btnCheckThese').addEventListener('click', () => {
       if (!state.codes) return;
       switchTab('check');
@@ -773,7 +820,25 @@
     document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     Check.init();
     ['packDate', 'startNum'].forEach((id) => $(id).addEventListener('input', () => { updateDerived(); schedulePreview(); }));
-    $('btnResetZones').addEventListener('click', () => { state.zones = JSON.parse(JSON.stringify(DEFAULT_ZONES)); writeZonesToForm(); writeStyle(DEFAULT_STYLE); schedulePreview(); });
+    $('btnMakeDefault').addEventListener('click', async () => {
+      readZonesFromForm();
+      DEFAULT_ZONES = { code: Object.assign({}, state.zones.code), info: Object.assign({}, state.zones.info) };
+      DEFAULT_STYLE = readStyle();
+      await idbPut('meta', { key: 'defaults', zones: DEFAULT_ZONES, style: DEFAULT_STYLE });
+      $('defaultsStatus').textContent = 'Сохранено: эта раскладка теперь штатная для новых товаров и кнопки «Вернуть штатную».';
+    });
+    $('btnResetZones').addEventListener('click', () => {
+      state.zones = JSON.parse(JSON.stringify(DEFAULT_ZONES)); writeZonesToForm(); writeStyle(DEFAULT_STYLE);
+      schedulePreview(); scheduleProfileAutosave();
+    });
+    $('btnFactory').addEventListener('click', async () => {
+      if (!confirm('Вернуть заводскую раскладку и сделать её штатной?')) return;
+      DEFAULT_ZONES = JSON.parse(JSON.stringify(FACTORY_ZONES)); DEFAULT_STYLE = Object.assign({}, FACTORY_STYLE);
+      await idbDel('meta', 'defaults');
+      state.zones = JSON.parse(JSON.stringify(DEFAULT_ZONES)); writeZonesToForm(); writeStyle(DEFAULT_STYLE);
+      schedulePreview(); scheduleProfileAutosave();
+      $('defaultsStatus').textContent = 'Возвращена заводская раскладка.';
+    });
     $('btnGenerate').addEventListener('click', generate);
     $('btnExport').addEventListener('click', exportBackup);
     $('fileImport').addEventListener('change', (e) => e.target.files[0] && importBackup(e.target.files[0]));

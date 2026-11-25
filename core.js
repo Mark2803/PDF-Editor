@@ -456,6 +456,18 @@
     return { layout, pad, prefixSize: s2, numberSize: n2 };
   }
 
+  /**
+   * Раскладка с заданными размерами шрифта (pt): текст не подгоняется под рамку.
+   * Рамка задаёт левый верхний угол и ширину: если «артикул дата номер» не помещается в одну строку
+   * по ширине рамки — номер переносится на вторую строку.
+   */
+  function planInfoFixed(fonts, prefix, maxNumberStr, zone, style) {
+    const ps = style.prefixPt || 8.5; const ns = style.numberPt || 17;
+    const oneW = fonts.prefix.widthOfTextAtSize(prefix + ' ', ps) + fonts.number.widthOfTextAtSize(maxNumberStr, ns);
+    let layout = style.layout && style.layout !== 'auto' ? style.layout : (oneW <= zone.w + 0.01 ? 'one' : 'two');
+    return { layout, pad: 0, prefixSize: ps, numberSize: ns, top: true, gap: ps * 0.3 };
+  }
+
   function drawInfo(page, fonts, plan, zone, prefix, numberStr, style) {
     const cPrefix = hexToRgb(style.prefixColor || '#000000');
     const cNum = hexToRgb(style.numberColor || '#000000');
@@ -469,14 +481,14 @@
       let x = zone.x + plan.pad;
       if (align === 'center') x = zone.x + (zone.w - total) / 2;
       if (align === 'right') x = zone.x + zone.w - plan.pad - total;
-      const base = zone.y + (zone.h - plan.numberSize * capR) / 2;
+      const base = plan.top ? zone.y + zone.h - plan.numberSize * capR : zone.y + (zone.h - plan.numberSize * capR) / 2;
       page.drawText(p, { x, y: base, size: plan.prefixSize, font: fonts.prefix, color: cPrefix });
       page.drawText(numberStr, { x: x + wP, y: base, size: plan.numberSize, font: fonts.number, color: cNum });
     } else {
       const wP = fonts.prefix.widthOfTextAtSize(prefix, plan.prefixSize);
       const wN = fonts.number.widthOfTextAtSize(numberStr, plan.numberSize);
       const capP = plan.prefixSize * capR; const capN = plan.numberSize * capR;
-      const gap = Math.max(1, (zone.h - 2 * plan.pad - capP - capN) / 2);
+      const gap = plan.top ? plan.gap : Math.max(1, (zone.h - 2 * plan.pad - capP - capN) / 2);
       const top = zone.y + zone.h - plan.pad;
       const pos = (w) => (align === 'left' ? zone.x + plan.pad : align === 'right' ? zone.x + zone.w - plan.pad - w : zone.x + (zone.w - w) / 2);
       page.drawText(prefix, { x: pos(wP), y: top - capP, size: plan.prefixSize, font: fonts.prefix, color: cPrefix });
@@ -602,9 +614,17 @@
       total = opts.limit || 1;
     }
     const maxNumberStr = String(start + Math.max(total, opts.analysis ? opts.analysis.pageCount : total) - 1).replace(/\d/g, '8');
-    const infoZone = zoneToPt(opts.zones.info, H);
-    const plan = planInfoLayout(fonts, prefix, maxNumberStr, infoZone, Object.assign({ layout: 'one' }, opts.style || {}));
-    const codeZone = zoneToPt(opts.zones.code, H);
+    // зоны не выходят за край этикетки (поле 1 мм)
+    const clampZone = (z) => {
+      const e = 1 * MM;
+      const x = Math.max(e, Math.min(z.x, W - e - 5)); const y = Math.max(e, Math.min(z.y, H - e - 5));
+      return { x, y, w: Math.max(5, Math.min(z.w, W - e - x)), h: Math.max(5, Math.min(z.h, H - e - y)) };
+    };
+    const infoZone = clampZone(zoneToPt(opts.zones.info, H));
+    const st = opts.style || {};
+    const plan = st.prefixPt ? planInfoFixed(fonts, prefix, maxNumberStr, infoZone, st)
+      : planInfoLayout(fonts, prefix, maxNumberStr, infoZone, Object.assign({ layout: 'one' }, st));
+    const codeZone = clampZone(zoneToPt(opts.zones.code, H));
 
     for (let i = 0; i < total; i++) {
       const page = out.addPage([W, H]);
@@ -621,7 +641,10 @@
         page.drawText('DataMatrix', { x: x + 2, y: y + side / 2, size: Math.max(4, side / 9), font: fonts.prefix, color: rgb(0.3, 0.3, 0.3) });
       }
       drawInfo(page, fonts, plan, infoZone, prefix, String(start + i), opts.style || {});
-      if (opts.showFrames) drawZoneFrames(page, opts.zones, H);
+      if (opts.showFrames) {
+        page.drawRectangle({ x: codeZone.x, y: codeZone.y, width: codeZone.w, height: codeZone.h, borderColor: rgb(0.9, 0.1, 0.1), borderWidth: 0.6, opacity: 0, borderOpacity: 0.9 });
+        page.drawRectangle({ x: infoZone.x, y: infoZone.y, width: infoZone.w, height: infoZone.h, borderColor: rgb(0.2, 0.25, 0.8), borderWidth: 0.6, opacity: 0, borderOpacity: 0.9 });
+      }
       if (opts.onProgress && i % 20 === 0) { opts.onProgress(i, total); await new Promise((r) => setTimeout(r, 0)); }
     }
     out.setTitle(`Этикетки ${prefix} ${start}-${start + total - 1}`);
