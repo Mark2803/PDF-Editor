@@ -101,10 +101,13 @@
 
 ### Установка (один раз, под root в свежем SSH-терминале)
 
+Папку создаёт root: пользователь `ivanc1539` не может сам создавать папки в `/home/ivanc1539`.
+
 1. Код и настройки:
    ```
    U="runuser -u ivanc1539 --"
-   cd /home/ivanc1539 && $U git clone https://github.com/Mark2803/PDF-Editor.git pdf-editor && cd pdf-editor
+   mkdir -p /home/ivanc1539/pdf-editor && chown ivanc1539: /home/ivanc1539/pdf-editor && cd /home/ivanc1539/pdf-editor
+   $U git clone https://github.com/Mark2803/PDF-Editor.git .
    $U cp .env.example .env
    DB="$(grep -E '^DATABASE_URL=' /home/ivanc1539/tea-market-v2/backend/.env | cut -d= -f2- | tr -d '"')"
    SS="$($U node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
