@@ -24,7 +24,7 @@
 <section class="col form">
 
   <div class="card">
-    <h2>1. Товар</h2>
+    <h2>1. Товар и партия</h2>
     <div class="row">
       <label class="grow">Артикул
         <input id="article" list="articleList" placeholder="начните вводить, напр. shu50" autocomplete="off">
@@ -34,30 +34,52 @@
         <input id="productName" placeholder="Смола Шу пуэра 50 шт">
       </label>
     </div>
+    <p id="articleWarn" class="warn" hidden></p>
     <div class="row">
-      <button id="btnSaveProfile">Сохранить товар</button>
+      <label>Дата фасовки <input id="packDate" type="date"></label>
+      <label>Начальный номер <input id="startNum" type="number" min="1" step="1" value="1"></label>
+      <div class="range-box"><span class="muted">Номера</span><b id="rangeText">—</b></div>
+    </div>
+    <p class="muted small">На этикетке будет: <b id="sampleText">—</b></p>
+    <div class="row">
+      <button id="btnSaveProfile" class="ghost">Сохранить товар</button>
       <button id="btnDeleteProfile" class="ghost danger">Удалить товар</button>
       <span id="profileStatus" class="muted"></span>
     </div>
-    <p id="articleWarn" class="warn" hidden></p>
   </div>
 
   <div class="card">
-    <h2>2. Шаблон этикетки</h2>
-    <label class="file">Файл шаблона (PDF — лучше всего; PNG/JPG — от 300 dpi)
+    <h2>2. Файлы</h2>
+    <label class="drop" id="dropTpl">
       <input id="tplFile" type="file" accept=".pdf,.png,.jpg,.jpeg">
+      <b>Потребительская этикетка</b>
+      <span class="muted small">Перетащите файл сюда или нажмите, чтобы выбрать. PDF — лучше всего; PNG/JPG — от 300 dpi</span>
+      <span id="tplInfo" class="muted">Шаблон не загружен</span>
     </label>
-    <div id="tplInfo" class="muted">Шаблон не загружен</div>
     <div class="row" id="tplSizeRow">
-      <label>Ширина, мм <input id="tplW" type="number" step="0.5" value="75"></label>
+      <label>Ширина этикетки, мм <input id="tplW" type="number" step="0.5" value="75"></label>
       <label>Высота, мм <input id="tplH" type="number" step="0.5" value="120"></label>
     </div>
+    <label class="drop" id="dropCodes">
+      <input id="codesFile" type="file" accept=".pdf">
+      <b>Коды маркировки из «Честного знака» (PDF)</b>
+      <span class="muted small">Перетащите файл сюда или нажмите, чтобы выбрать</span>
+      <span id="codesInfo" class="muted">Файл кодов не загружен</span>
+    </label>
+    <div id="codesProblems"></div>
+    <button id="btnCheckThese" class="ghost" hidden>Проверить эти коды в «Честном знаке»</button>
   </div>
 
-  <div class="card">
-    <h2>3. Где печатать (мм от левого верхнего угла)</h2>
+  <div class="card actions">
+    <button id="btnGenerate" class="primary" disabled>Сформировать этикетки и коды</button>
+    <div id="progress" class="progress" hidden><div></div></div>
+    <div id="results"></div>
+  </div>
+
+  <details class="card advanced">
+    <summary>Настройки раскладки (обычно менять не нужно)</summary>
     <div class="row">
-      <label class="grow">Раскладка
+      <label class="grow">Раскладка этикетки
         <select id="zonePreset">
           <option value="max">Код максимально крупно, номер в левом верхнем углу</option>
           <option value="mockup">Как на макете: номер над кодом</option>
@@ -65,7 +87,7 @@
         </select>
       </label>
     </div>
-    <h3><span class="sw red"></span>Код маркировки на этикетке</h3>
+    <h3><span class="sw red"></span>Код маркировки на этикетке, мм от левого верхнего угла</h3>
     <div class="row zone" data-zone="code">
       <label>X <input type="number" step="0.5" data-k="x"></label>
       <label>Y <input type="number" step="0.5" data-k="y"></label>
@@ -79,56 +101,27 @@
       <label>Ширина <input type="number" step="0.5" data-k="w"></label>
       <label>Высота <input type="number" step="0.5" data-k="h"></label>
     </div>
-    <h3><span class="sw blue"></span>Артикул, дата, номер на странице кода (для внешней упаковки)</h3>
-    <div class="row zone" data-zone="codeInfo">
-      <label>X <input type="number" step="0.5" data-k="x"></label>
-      <label>Y <input type="number" step="0.5" data-k="y"></label>
-      <label>Ширина <input type="number" step="0.5" data-k="w"></label>
-      <label>Высота <input type="number" step="0.5" data-k="h"></label>
-    </div>
-    <details>
-      <summary>Оформление текста</summary>
-      <div class="row">
-        <label>Цвет артикула/даты <input id="colPrefix" type="color" value="#000000"></label>
-        <label>Цвет номера <input id="colNumber" type="color" value="#000000"></label>
-        <label>Номер крупнее в <input id="numScale" type="number" step="0.1" min="1" max="3" value="1.7"> раза</label>
-      </div>
-      <div class="row">
-        <label>Текст под кодом, % <input id="codeTextPct" type="number" step="5" min="40" max="100" value="70"></label>
-      </div>
-      <div class="row">
-        <label>Выравнивание на этикетке
-          <select id="alignLabel"><option value="left">слева</option><option value="center">по центру</option><option value="right">справа</option></select>
-        </label>
-        <label>Раскладка на странице кода
-          <select id="layoutCode"><option value="auto">авто</option><option value="one">в одну строку</option><option value="two">в две строки</option></select>
-        </label>
-      </div>
-      <button id="btnResetZones" class="ghost">Вернуть зоны по умолчанию</button>
-    </details>
-  </div>
-
-  <div class="card">
-    <h2>4. Партия</h2>
+    <h3>Бумажка кода для внешней упаковки</h3>
     <div class="row">
-      <label>Дата фасовки <input id="packDate" type="date"></label>
-      <label>Начальный номер <input id="startNum" type="number" min="1" step="1" value="1"></label>
-      <div class="range-box"><span class="muted">Номера</span><b id="rangeText">—</b></div>
+      <label>Ширина, мм <input id="paperW" type="number" step="1" min="10" value="20"></label>
+      <label>Высота, мм <input id="paperH" type="number" step="1" min="10" value="30"></label>
+      <label>Запас от края, мм <input id="paperMargin" type="number" step="0.5" min="0" max="5" value="1.5"></label>
     </div>
-    <label class="file">Файл кодов из «Честного знака» (PDF)
-      <input id="codesFile" type="file" accept=".pdf">
-    </label>
-    <div id="codesInfo" class="muted">Файл кодов не загружен</div>
-    <div id="codesProblems"></div>
-    <p class="muted small">На этикетке будет: <b id="sampleText">—</b></p>
-    <button id="btnCheckThese" class="ghost" hidden>Проверить эти коды в «Честном знаке»</button>
-  </div>
-
-  <div class="card actions">
-    <button id="btnGenerate" class="primary" disabled>Сформировать этикетки и коды</button>
-    <div id="progress" class="progress" hidden><div></div></div>
-    <div id="results"></div>
-  </div>
+    <p class="muted small">Запас от края — на люфт ленты в принтере: код не уйдёт за край бумажки.</p>
+    <h3>Текст</h3>
+    <div class="row">
+      <label>Номер крупнее в <input id="numScale" type="number" step="0.1" min="1" max="3" value="1.7"> раза</label>
+      <label>Текст под кодом, % <input id="codeTextPct" type="number" step="5" min="40" max="100" value="70"></label>
+      <label>Выравнивание на этикетке
+        <select id="alignLabel"><option value="left">слева</option><option value="center">по центру</option><option value="right">справа</option></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Цвет артикула/даты <input id="colPrefix" type="color" value="#000000"></label>
+      <label>Цвет номера <input id="colNumber" type="color" value="#000000"></label>
+    </div>
+    <button id="btnResetZones" class="ghost">Вернуть всё по умолчанию</button>
+  </details>
 </section>
 
 <section class="col preview">
@@ -139,7 +132,7 @@
     </div>
     <div class="previews">
       <figure><figcaption>Этикетка</figcaption><iframe id="pvLabel" title="Этикетка"></iframe></figure>
-      <figure><figcaption>Код для внешней упаковки</figcaption><iframe id="pvCode" title="Код"></iframe></figure>
+      <figure><figcaption>Код для внешней упаковки (бумажка)</figcaption><iframe id="pvCode" title="Код"></iframe></figure>
     </div>
     <p class="muted small">Рамки видны только в предпросмотре и в итоговые файлы не попадают.</p>
   </div>

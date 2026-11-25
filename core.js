@@ -542,6 +542,33 @@
     }
   }
 
+
+  /**
+   * Встроить из файла ЧЗ квадрат DataMatrix и текст под ним (раздельно) для каждой страницы.
+   * Порядок строго сохраняется: элемент i — страница i файла кодов.
+   */
+  async function embedCodeBlocks(out, codesBytes, analysis, limit) {
+    const src = await PDFDocument.load(codesBytes, { ignoreEncryption: true, updateMetadata: false });
+    const srcPages = src.getPages();
+    if (srcPages.length !== analysis.pageCount) throw new Error('Файл кодов изменился после проверки — загрузите его заново.');
+    const total = Math.min(srcPages.length, limit || Infinity);
+    const pgs = []; const boxes = []; const map = [];
+    for (let i = 0; i < total; i++) {
+      const pa = analysis.pages[i];
+      if (pa.dmCrop) {
+        map.push({ dm: pgs.length, text: pa.textCrop ? pgs.length + 1 : -1 });
+        pgs.push(srcPages[i]); boxes.push(pa.dmCrop);
+        if (pa.textCrop) { pgs.push(srcPages[i]); boxes.push(pa.textCrop); }
+      } else {
+        map.push({ whole: pgs.length });
+        pgs.push(srcPages[i]); boxes.push(pa.crop);
+      }
+    }
+    const emb = await out.embedPages(pgs, boxes);
+    const embedded = map.map((m) => (m.whole !== undefined ? { whole: emb[m.whole] } : { dm: emb[m.dm], text: m.text >= 0 ? emb[m.text] : null }));
+    return { embedded, total };
+  }
+
   /**
    * Собрать этикетки.
    * opts: {
@@ -570,25 +597,7 @@
 
     let total; let embedded = [];
     if (opts.analysis && opts.codesBytes) {
-      const src = await PDFDocument.load(opts.codesBytes, { ignoreEncryption: true, updateMetadata: false });
-      const srcPages = src.getPages();
-      total = Math.min(srcPages.length, opts.limit || Infinity);
-      if (srcPages.length !== opts.analysis.pageCount) throw new Error('Файл кодов изменился после проверки — загрузите его заново.');
-      // Квадрат DataMatrix и текст под ним встраиваем раздельно, чтобы квадрат был максимально крупным
-      const pgs = []; const boxes = []; const map = [];
-      for (let i = 0; i < total; i++) {
-        const pa = opts.analysis.pages[i];
-        if (pa.dmCrop) {
-          map.push({ dm: pgs.length, text: pa.textCrop ? pgs.length + 1 : -1 });
-          pgs.push(srcPages[i]); boxes.push(pa.dmCrop);
-          if (pa.textCrop) { pgs.push(srcPages[i]); boxes.push(pa.textCrop); }
-        } else {
-          map.push({ whole: pgs.length });
-          pgs.push(srcPages[i]); boxes.push(pa.crop);
-        }
-      }
-      const emb = await out.embedPages(pgs, boxes);
-      embedded = map.map((m) => (m.whole !== undefined ? { whole: emb[m.whole] } : { dm: emb[m.dm], text: m.text >= 0 ? emb[m.text] : null }));
+      ({ embedded, total } = await embedCodeBlocks(out, opts.codesBytes, opts.analysis, opts.limit));
     } else {
       total = opts.limit || 1;
     }
@@ -624,28 +633,58 @@
    * Дополнить исходный файл кодов полем «артикул дата НОМЕР» (для внешней упаковки).
    * zone — в мм от левого верхнего угла страницы кода.
    */
+  /**
+   * Коды для внешней упаковки — заново на бумажке своего размера (по умолчанию 20×30 мм).
+   * Сверху «артикул дата» и крупный номер, ниже DataMatrix как можно крупнее и текст кода.
+   * Со всех сторон оставляется запас (paper.margin) на люфт ленты в принтере.
+   * opts: { codesBytes, analysis, paper:{w,h,margin} (мм), article, dateIso, start, style, limit?, showFrames?, onProgress? }
+   */
   async function buildCodes(opts) {
-    const doc = await PDFDocument.load(opts.codesBytes, { ignoreEncryption: true, updateMetadata: false });
-    const pages = doc.getPages();
-    if (opts.analysis && pages.length !== opts.analysis.pageCount) throw new Error('Файл кодов изменился после проверки — загрузите его заново.');
-    const fonts = await loadFonts(doc);
+    const paper = Object.assign({ w: 20, h: 30, margin: 1.5 }, opts.paper || {});
+    const W = paper.w * MM; const H = paper.h * MM; const m = paper.margin * MM;
+    const out = await PDFDocument.create();
+    const fonts = await loadFonts(out);
     const prefix = safeText(`${opts.article} ${formatDate(opts.dateIso)}`.trim());
     const start = Number(opts.start) || 1;
-    const total = Math.min(pages.length, opts.limit || Infinity);
-    const maxNumberStr = String(start + pages.length - 1).replace(/\d/g, '8');
-    const keep = [];
+    let embedded = []; let total = opts.limit || 1;
+    if (opts.analysis && opts.codesBytes) ({ embedded, total } = await embedCodeBlocks(out, opts.codesBytes, opts.analysis, opts.limit));
+    const maxNumberStr = String(start + (opts.analysis ? opts.analysis.pageCount : total) - 1).replace(/\d/g, '8');
+    const style = Object.assign({ align: 'center', layout: 'two', codeAlign: 'center' }, opts.style || {});
+
+    // Рабочая область внутри полей; узкая бумажка — номер сверху, код ниже.
+    const area = { x: m, y: m, w: W - 2 * m, h: H - 2 * m };
+    const portrait = area.h >= area.w;
+    let infoZone; let codeZone;
+    if (portrait) {
+      const infoH = Math.min(area.h * 0.2, area.w * 0.4);
+      infoZone = { x: area.x, y: area.y + area.h - infoH, w: area.w, h: infoH };
+      codeZone = { x: area.x, y: area.y, w: area.w, h: area.h - infoH - 0.5 * MM };
+    } else {
+      const infoW = Math.min(area.w * 0.32, area.h * 0.9);
+      infoZone = { x: area.x, y: area.y, w: infoW, h: area.h };
+      codeZone = { x: area.x + infoW + 0.5 * MM, y: area.y, w: area.w - infoW - 0.5 * MM, h: area.h };
+    }
+    const plan = planInfoLayout(fonts, prefix, maxNumberStr, infoZone, Object.assign({}, style, { layout: 'two' }));
+    // в узкой зоне поля внутри не нужны — их уже дают поля бумажки
+    plan.pad = 0;
+
     for (let i = 0; i < total; i++) {
-      const page = pages[i];
-      const { height: H } = page.getSize();
-      const zone = zoneToPt(opts.zone, H);
-      const plan = planInfoLayout(fonts, prefix, maxNumberStr, zone, Object.assign({ layout: 'auto', align: 'center' }, opts.style || {}));
-      drawInfo(page, fonts, plan, zone, prefix, String(start + i), Object.assign({ align: 'center' }, opts.style || {}));
-      if (opts.showFrames) drawZoneFrames(page, { info: opts.zone }, H);
-      keep.push(i);
+      const page = out.addPage([W, H]);
+      if (embedded[i]) drawCodeBlock(page, embedded[i], codeZone, Object.assign({ codeAlign: 'center' }, style));
+      else {
+        const side = Math.min(codeZone.w, codeZone.h / 1.16);
+        page.drawRectangle({ x: codeZone.x + (codeZone.w - side) / 2, y: codeZone.y + codeZone.h - side, width: side, height: side, color: rgb(0.75, 0.75, 0.75) });
+      }
+      drawInfo(page, fonts, plan, infoZone, prefix, String(start + i), style);
+      if (opts.showFrames) {
+        page.drawRectangle({ x: 0.3, y: 0.3, width: W - 0.6, height: H - 0.6, borderColor: rgb(0.6, 0.6, 0.6), borderWidth: 0.5, opacity: 0 });
+        page.drawRectangle({ x: area.x, y: area.y, width: area.w, height: area.h, borderColor: rgb(0.9, 0.1, 0.1), borderWidth: 0.4, opacity: 0, borderDashArray: [2, 2] });
+      }
       if (opts.onProgress && i % 25 === 0) { opts.onProgress(i, total); await new Promise((r) => setTimeout(r, 0)); }
     }
-    for (let i = pages.length - 1; i >= total; i--) doc.removePage(i);
-    return doc.save();
+    out.setTitle(`Коды для внешней упаковки ${prefix} ${start}-${start + total - 1}`);
+    out.setProducer('PDF-Editor / этикетки Честный знак');
+    return out.save();
   }
 
   function buildJournalCsv(analysis, { article, dateIso, start }) {

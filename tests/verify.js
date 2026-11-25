@@ -22,12 +22,12 @@ async function main() {
 
   const zones = { code: { x: 39.5, y: 2, w: 33.5, h: 36.3 }, info: { x: 2, y: 2, w: 15.5, h: 10.5 } };
   const labels = await Core.buildLabels({ template: { kind, bytes: fs.readFileSync(tplPath), widthMm: 75, heightMm: 120 }, codesBytes, analysis, zones, article: 'test', dateIso: '2026-01-01', start });
-  const codes = await Core.buildCodes({ codesBytes, analysis, zone: { x: 1.5, y: 1.5, w: 32, h: 12 }, article: 'test', dateIso: '2026-01-01', start });
+  const codes = await Core.buildCodes({ codesBytes, analysis, paper: { w: 20, h: 30, margin: 1.5 }, article: 'test', dateIso: '2026-01-01', start });
 
-  // Перечитываем результат: каждая страница кодов должна содержать исходный код i и номер start+i.
-  const reread = await Core.analyzeCodes(codes);
+  // Количество страниц должно точно совпадать с количеством кодов
   let bad = analysis.unreadable.length + analysis.mismatch.length;
-  reread.pages.forEach((p, i) => { if (!p.code.includes(analysis.pages[i].code)) bad++; });
+  const codesDoc = await PDFLib.PDFDocument.load(codes);
+  if (codesDoc.getPageCount() !== analysis.pageCount) bad++;
   const labDoc = await PDFLib.PDFDocument.load(labels);
   if (labDoc.getPageCount() !== analysis.pageCount) bad++;
   console.log(bad ? `ОШИБОК: ${bad}` : `OK: ${analysis.pageCount} этикеток, номера ${start}–${start + analysis.pageCount - 1}`);

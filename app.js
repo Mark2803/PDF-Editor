@@ -14,7 +14,7 @@
     info: Object.assign({}, PRESETS.max.info),
     codeInfo: { x: 1.5, y: 1.5, w: 32, h: 12 },
   };
-  const DEFAULT_STYLE = { prefixColor: '#000000', numberColor: '#000000', numberScale: 1.7, alignLabel: 'left', layoutCode: 'auto', codeTextPct: 70, zonePreset: 'max' };
+  const DEFAULT_STYLE = { prefixColor: '#000000', numberColor: '#000000', numberScale: 1.7, alignLabel: 'left', codeTextPct: 70, zonePreset: 'max', paperW: 20, paperH: 30, paperMargin: 1.5 };
   // старые значения по умолчанию (первая версия) — для автоматического обновления сохранённых товаров
   const OLD_ZONES = { code: { x: 49, y: 13.5, w: 23, h: 23.5 }, info: { x: 33, y: 1.5, w: 39, h: 9 } };
 
@@ -102,7 +102,9 @@
       numberColor: $('colNumber').value,
       numberScale: Math.max(1, parseFloat($('numScale').value) || 1.7),
       alignLabel: $('alignLabel').value,
-      layoutCode: $('layoutCode').value,
+      paperW: Math.max(10, parseFloat($('paperW').value) || 20),
+      paperH: Math.max(10, parseFloat($('paperH').value) || 30),
+      paperMargin: Math.min(5, Math.max(0, parseFloat($('paperMargin').value) || 0)),
       codeTextPct: Math.min(100, Math.max(30, parseFloat($('codeTextPct').value) || 70)),
       zonePreset: $('zonePreset').value,
     };
@@ -110,7 +112,8 @@
   function writeStyle(st) {
     const s = Object.assign({}, DEFAULT_STYLE, st || {});
     $('colPrefix').value = s.prefixColor; $('colNumber').value = s.numberColor;
-    $('numScale').value = s.numberScale; $('alignLabel').value = s.alignLabel; $('layoutCode').value = s.layoutCode;
+    $('numScale').value = s.numberScale; $('alignLabel').value = s.alignLabel;
+    $('paperW').value = s.paperW; $('paperH').value = s.paperH; $('paperMargin').value = s.paperMargin;
     $('codeTextPct').value = s.codeTextPct; $('zonePreset').value = s.zonePreset || 'custom';
   }
   const article = () => $('article').value.trim();
@@ -254,7 +257,8 @@
     const t = state.template;
     const info = $('tplInfo');
     const isImg = t && t.kind !== 'pdf';
-    $('tplSizeRow').style.display = isImg || !t ? '' : 'none';
+    $('tplSizeRow').style.display = isImg ? '' : 'none';
+    $('dropTpl').classList.toggle('done', !!t);
     if (!t) { info.textContent = 'Шаблон не загружен'; info.className = 'muted'; return; }
     $('tplW').value = t.widthMm; $('tplH').value = t.heightMm;
     if (t.kind === 'pdf') {
@@ -280,11 +284,13 @@
     info.className = 'muted';
     info.textContent = 'Читаю файл…';
     state.codes = null;
+    $('dropCodes').classList.remove('done');
     updateDerived();
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const analysis = await Core.analyzeCodes(bytes, (i, n) => { info.textContent = `Читаю файл… ${i} / ${n}`; });
       state.codes = { bytes, fileName: file.name, analysis, reused: [] };
+      $('dropCodes').classList.add('done');
       const codes = analysis.pages.map((p) => p.code).filter(Boolean);
       state.codes.reused = await idbGetMany('used', codes);
       info.className = '';
@@ -361,7 +367,8 @@
       dateIso: $('packDate').value,
       start: startNum(),
       labelStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: st.alignLabel, layout: 'auto', codeTextScale: st.codeTextPct / 100 },
-      codeStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: 'center', layout: st.layoutCode },
+      codeStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: 'center', codeTextScale: st.codeTextPct / 100 },
+      paper: { w: st.paperW, h: st.paperH, margin: st.paperMargin },
     }, extra || {});
   }
 
@@ -382,7 +389,7 @@
       let code = null;
       if (o.codesBytes) {
         code = await Core.buildCodes({
-          codesBytes: o.codesBytes, analysis: o.analysis, zone: state.zones.codeInfo,
+          codesBytes: o.codesBytes, analysis: o.analysis, paper: o.paper,
           article: o.article, dateIso: o.dateIso, start: o.start, style: o.codeStyle, limit: 1, showFrames: frames,
         });
       }
@@ -435,7 +442,7 @@
         onProgress: (i) => setProgress((i / n) * 0.6),
       });
       const codes = await Core.buildCodes({
-        codesBytes: o.codesBytes, analysis: a, zone: state.zones.codeInfo,
+        codesBytes: o.codesBytes, analysis: a, paper: o.paper,
         article: o.article, dateIso: o.dateIso, start: o.start, style: o.codeStyle,
         onProgress: (i) => setProgress(0.6 + (i / n) * 0.35),
       });
@@ -739,12 +746,18 @@
       await idbDel('profiles', a); state.profiles.delete(a); refreshArticleList(); updateProfileStatus();
     });
     $('tplFile').addEventListener('change', (e) => onTemplateFile(e.target.files[0]));
+    document.querySelectorAll('.drop').forEach((d) => {
+      ['dragenter', 'dragover'].forEach((ev) => d.addEventListener(ev, () => d.classList.add('over')));
+      ['dragleave', 'drop'].forEach((ev) => d.addEventListener(ev, () => d.classList.remove('over')));
+    });
+    // файлы, брошенные мимо полей, браузер не должен открывать вместо страницы
+    ['dragover', 'drop'].forEach((ev) => window.addEventListener(ev, (e) => { if (!e.target.closest || !e.target.closest('.drop')) e.preventDefault(); }));
     $('codesFile').addEventListener('change', (e) => onCodesFile(e.target.files[0]));
     ['tplW', 'tplH'].forEach((id) => $(id).addEventListener('input', () => {
       if (state.template && state.template.kind !== 'pdf') { state.template.widthMm = parseFloat($('tplW').value) || 75; state.template.heightMm = parseFloat($('tplH').value) || 120; showTemplateInfo(); }
       schedulePreview();
     }));
-    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #numScale, #alignLabel, #layoutCode, #showFrames, #codeTextPct')
+    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #numScale, #alignLabel, #showFrames, #codeTextPct, #paperW, #paperH, #paperMargin')
       .forEach((el) => el.addEventListener('input', schedulePreview));
     document.querySelectorAll('.zone input').forEach((el) => el.addEventListener('input', () => { $('zonePreset').value = 'custom'; }));
     $('zonePreset').addEventListener('change', () => {

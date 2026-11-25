@@ -62,3 +62,11 @@ table.results td.code { font-family: ui-monospace, Consolas, monospace; word-bre
 
 .lock { max-width: 520px; margin: 60px auto; text-align: center; }
 .lock .btn { text-decoration: none; }
+
+.drop { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px; margin: 8px 0; border: 2px dashed #cfd4dc; border-radius: 10px; background: #fafbfc; cursor: pointer; color: var(--text); font-size: 14px; }
+.drop:hover, .drop.over { border-color: var(--accent); background: #f1f3fd; }
+.drop.done { border-style: solid; border-color: #9fd3ae; background: #f3fbf5; }
+.drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop .warn { margin: 4px 0 0; }
+details.advanced > summary { font-weight: 600; margin: 0; }
+details.advanced[open] > summary { margin-bottom: 12px; }
