@@ -7,9 +7,10 @@
  * Порядок никогда не меняется, страницы не пропускаются и не дублируются.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory;
-  else root.LabelCore = factory(root.PDFLib);
-})(typeof self !== 'undefined' ? self : this, function (PDFLib) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = (PDFLib, DMlib) => factory(PDFLib, DMlib || require('./datamatrix.js'));
+  } else root.LabelCore = factory(root.PDFLib, root.DataMatrix);
+})(typeof self !== 'undefined' ? self : this, function (PDFLib, DM) {
   'use strict';
 
   const MM = 72 / 25.4; // 1 мм в пунктах PDF
@@ -280,6 +281,54 @@
     return { texts, objects };
   }
 
+  /** Закрашенные прямоугольники внутри Form XObject (модули DataMatrix), в системе координат формы. */
+  function formFilledRects(xo) {
+    const toks = tokenize(bytesToLatin1(streamBytes(xo)));
+    const rects = []; const stack = [];
+    let path = []; let cur = null; let pts = [];
+    const flushSub = () => { if (pts.length) path.push(pts); pts = []; };
+    for (const t of toks) {
+      if (t.t !== 'op') { stack.push(t); continue; }
+      const n = stack.map((s) => s.v);
+      switch (t.v) {
+        case 'm': flushSub(); cur = [n[n.length - 2], n[n.length - 1]]; pts = [cur]; break;
+        case 'l': cur = [n[n.length - 2], n[n.length - 1]]; pts.push(cur); break;
+        case 'h': break;
+        case 're': {
+          flushSub();
+          const [x, y, w, h] = n.slice(-4);
+          path.push([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]);
+          break;
+        }
+        case 'f': case 'F': case 'f*': case 'B': case 'B*': case 'b': case 'b*':
+          flushSub();
+          for (const p of path) {
+            const xs = p.map((q) => q[0]); const ys = p.map((q) => q[1]);
+            rects.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+          }
+          path = []; break;
+        case 'n': case 'S': case 's': flushSub(); path = []; break;
+        default: break;
+      }
+      stack.length = 0;
+    }
+    return rects;
+  }
+
+  /** Прочитать полный код из векторного DataMatrix. Возвращает строку с GS или '' */
+  function readDataMatrix(dmObj) {
+    if (!DM || !dmObj || !dmObj.raw || dmObj.subtype !== '/Form') return { code: '', error: 'не векторный DataMatrix' };
+    try {
+      const rects = formFilledRects(dmObj.raw).filter((r) => r.x1 - r.x0 > 1e-3 && r.y1 - r.y0 > 1e-3);
+      const bits = DM.matrixFromRects(rects);
+      const res = DM.decodeMatrix(bits);
+      if (!res.rsOk) return { code: '', error: 'контрольная сумма DataMatrix не сошлась' };
+      return { code: res.text, error: '' };
+    } catch (e) {
+      return { code: '', error: e.message };
+    }
+  }
+
   /**
    * Разбор одной страницы файла кодов: где DataMatrix, где текст, какой код.
    * Возвращает crop (в пунктах, система координат PDF) и текст кода.
@@ -308,7 +357,11 @@
       .map((t) => t.text.trim()).join('');
 
     const inset = 1.5; // не захватываем рамку страницы
-    let crop;
+    const clamp = (b) => ({
+      left: Math.max(inset, b.left), right: Math.min(W - inset, b.right),
+      bottom: Math.max(inset, b.bottom), top: Math.min(H - inset, b.top),
+    });
+    let crop; let dmCrop = null; let textCrop = null;
     if (dm) {
       const pad = 3;
       let bottom = dm.y0 - pad;
@@ -318,17 +371,19 @@
         bottom = minY - 1.5;
         const minX = Math.min(...below.map((t) => t.x));
         left = Math.min(left, minX - 1.5);
+        const maxH = Math.max(...below.map((t) => t.size));
+        textCrop = clamp({ left: Math.min(dm.x0, minX) - 4, right: dm.x1 + 4, bottom: minY - 0.8, top: Math.max(...below.map((t) => t.y)) + maxH * 0.85 });
       }
-      crop = {
-        left: Math.max(inset, left),
-        right: Math.min(W - inset, right),
-        bottom: Math.max(inset, bottom),
-        top: Math.min(H - inset, dm.y1 + pad),
-      };
+      crop = clamp({ left, right, bottom, top: dm.y1 + pad });
+      dmCrop = clamp({ left: dm.x0 - 0.3, right: dm.x1 + 0.3, bottom: dm.y0 - 0.3, top: dm.y1 + 0.3 });
     } else {
       crop = { left: inset, bottom: inset, right: W - inset, top: H - inset };
     }
-    return { width: W, height: H, crop, code, found: !!dm };
+    const dmRead = dm ? readDataMatrix(dm) : { code: '', error: 'DataMatrix не найден' };
+    // Сверка: полный код из DataMatrix должен начинаться с текста под ним (без GS)
+    let match = null;
+    if (dmRead.code && code) match = dmRead.code.replace(/\u001d/g, '').startsWith(code);
+    return { width: W, height: H, crop, dmCrop, textCrop, code, fullCode: dmRead.code, dmError: dmRead.error, match, found: !!dm };
   }
 
   /**
@@ -351,7 +406,9 @@
     });
     const notFound = result.map((p, i) => (p.found ? null : i + 1)).filter(Boolean);
     const noText = result.map((p, i) => (p.code ? null : i + 1)).filter(Boolean);
-    return { pageCount: pages.length, pages: result, duplicates, notFound, noText };
+    const unreadable = result.map((p, i) => (p.fullCode ? null : i + 1)).filter(Boolean);
+    const mismatch = result.map((p, i) => (p.match === false ? i + 1 : null)).filter(Boolean);
+    return { pageCount: pages.length, pages: result, duplicates, notFound, noText, unreadable, mismatch };
   }
 
   // ---------- оформление номера ----------
@@ -400,8 +457,8 @@
   }
 
   function drawInfo(page, fonts, plan, zone, prefix, numberStr, style) {
-    const cPrefix = hexToRgb(style.prefixColor || '#2b3fbf');
-    const cNum = hexToRgb(style.numberColor || '#1e9e3e');
+    const cPrefix = hexToRgb(style.prefixColor || '#000000');
+    const cNum = hexToRgb(style.numberColor || '#000000');
     const capR = 0.72;
     const align = style.align || 'left';
     if (plan.layout === 'one') {
@@ -427,6 +484,39 @@
     }
   }
 
+
+  /**
+   * Нарисовать код в зоне: квадрат как можно крупнее, под ним текст кода.
+   * style.codeTextScale — размер текста относительно «родного» (1 = как в файле ЧЗ), по умолчанию 0.7.
+   */
+  function drawCodeBlock(page, e, zone, style) {
+    if (e.whole) {
+      const s = Math.min(zone.w / e.whole.width, zone.h / e.whole.height);
+      const w = e.whole.width * s; const h = e.whole.height * s;
+      page.drawPage(e.whole, { x: zone.x + (zone.w - w) / 2, y: zone.y + zone.h - h, xScale: s, yScale: s });
+      return;
+    }
+    const r = style.codeTextScale || 0.7;
+    const gap = 0.6;
+    const dw = e.dm.width; const dh = e.dm.height;
+    const tw = e.text ? e.text.width : 0; const th = e.text ? e.text.height : 0;
+    let s = Math.min(zone.w / dw, (zone.h - (e.text ? gap : 0)) / (dh + th * r));
+    if (e.text) s = Math.min(s, zone.w / (tw * r));
+    const ts = s * r;
+    const w = dw * s; const h = dh * s;
+    const blockH = h + (e.text ? gap + th * ts : 0);
+    const top = zone.y + zone.h;
+    const align = style.codeAlign || 'center';
+    const xFor = (width) => (align === 'right' ? zone.x + zone.w - width : align === 'left' ? zone.x : zone.x + (zone.w - width) / 2);
+    const dmX = xFor(w);
+    page.drawPage(e.dm, { x: dmX, y: top - h, xScale: s, yScale: s });
+    if (e.text) {
+      // текст центрируем под квадратом
+      const tx = dmX + (w - tw * ts) / 2;
+      page.drawPage(e.text, { x: tx, y: top - blockH, xScale: ts, yScale: ts });
+    }
+  }
+
   /** зона в мм от левого верхнего угла -> прямоугольник PDF (пункты, от левого нижнего) */
   function zoneToPt(z, pageH) {
     return { x: z.x * MM, y: pageH - (z.y + z.h) * MM, w: z.w * MM, h: z.h * MM };
@@ -439,7 +529,7 @@
 
   async function loadFonts(doc) {
     return {
-      prefix: await doc.embedFont(StandardFonts.HelveticaBold),
+      prefix: await doc.embedFont(StandardFonts.Helvetica),
       number: await doc.embedFont(StandardFonts.HelveticaBold),
     };
   }
@@ -484,9 +574,21 @@
       const srcPages = src.getPages();
       total = Math.min(srcPages.length, opts.limit || Infinity);
       if (srcPages.length !== opts.analysis.pageCount) throw new Error('Файл кодов изменился после проверки — загрузите его заново.');
-      const boxes = []; const pgs = [];
-      for (let i = 0; i < total; i++) { pgs.push(srcPages[i]); boxes.push(opts.analysis.pages[i].crop); }
-      embedded = await out.embedPages(pgs, boxes);
+      // Квадрат DataMatrix и текст под ним встраиваем раздельно, чтобы квадрат был максимально крупным
+      const pgs = []; const boxes = []; const map = [];
+      for (let i = 0; i < total; i++) {
+        const pa = opts.analysis.pages[i];
+        if (pa.dmCrop) {
+          map.push({ dm: pgs.length, text: pa.textCrop ? pgs.length + 1 : -1 });
+          pgs.push(srcPages[i]); boxes.push(pa.dmCrop);
+          if (pa.textCrop) { pgs.push(srcPages[i]); boxes.push(pa.textCrop); }
+        } else {
+          map.push({ whole: pgs.length });
+          pgs.push(srcPages[i]); boxes.push(pa.crop);
+        }
+      }
+      const emb = await out.embedPages(pgs, boxes);
+      embedded = map.map((m) => (m.whole !== undefined ? { whole: emb[m.whole] } : { dm: emb[m.dm], text: m.text >= 0 ? emb[m.text] : null }));
     } else {
       total = opts.limit || 1;
     }
@@ -501,13 +603,10 @@
       if (tplImg) page.drawImage(tplImg, { x: 0, y: 0, width: W, height: H });
 
       if (embedded[i]) {
-        const e = embedded[i];
-        const s = Math.min(codeZone.w / e.width, codeZone.h / e.height);
-        const w = e.width * s; const h = e.height * s;
-        page.drawPage(e, { x: codeZone.x + (codeZone.w - w) / 2, y: codeZone.y + codeZone.h - h, xScale: s, yScale: s });
+        drawCodeBlock(page, embedded[i], codeZone, opts.style || {});
       } else {
         // заглушка для предпросмотра без файла кодов
-        const side = Math.min(codeZone.w, codeZone.h * 0.75);
+        const side = Math.min(codeZone.w, codeZone.h / 1.16);
         const x = codeZone.x + (codeZone.w - side) / 2; const y = codeZone.y + codeZone.h - side;
         page.drawRectangle({ x, y, width: side, height: side, color: rgb(0.75, 0.75, 0.75) });
         page.drawText('DataMatrix', { x: x + 2, y: y + side / 2, size: Math.max(4, side / 9), font: fonts.prefix, color: rgb(0.3, 0.3, 0.3) });
@@ -556,5 +655,5 @@
     return '﻿' + rows.map((r) => r.map(esc).join(';')).join('\r\n');
   }
 
-  return { MM, analyzeCodes, buildLabels, buildCodes, buildJournalCsv, formatDate, safeText, _internal: { tokenize, parseToUnicode, scanPage } };
+  return { MM, analyzeCodes, readCodesFromPdf: analyzeCodes, buildLabels, buildCodes, buildJournalCsv, formatDate, safeText, _internal: { tokenize, parseToUnicode, scanPage } };
 });

@@ -4,18 +4,23 @@
 <meta charset="utf-8">
 <title>Этикетки + Честный знак</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <h1>Этикетки + коды «Честный знак»</h1>
+  <nav class="tabs">
+    <button class="tab active" data-tab="labels">Этикетки</button>
+    <button class="tab" data-tab="check">Проверка кодов в ЧЗ</button>
+  </nav>
   <div class="hdr-actions">
     <button id="btnExport" class="ghost" title="Сохранить все товары, шаблоны и настройки в файл">Резервная копия</button>
     <label class="ghost btn" title="Загрузить товары и настройки из файла">Восстановить<input id="fileImport" type="file" accept=".json" hidden></label>
   </div>
 </header>
 
-<main>
+<main id="tab-labels">
 <section class="col form">
 
   <div class="card">
@@ -51,6 +56,15 @@
 
   <div class="card">
     <h2>3. Где печатать (мм от левого верхнего угла)</h2>
+    <div class="row">
+      <label class="grow">Раскладка
+        <select id="zonePreset">
+          <option value="max">Код максимально крупно, номер в левом верхнем углу</option>
+          <option value="mockup">Как на макете: номер над кодом</option>
+          <option value="custom">Свои координаты</option>
+        </select>
+      </label>
+    </div>
     <h3><span class="sw red"></span>Код маркировки на этикетке</h3>
     <div class="row zone" data-zone="code">
       <label>X <input type="number" step="0.5" data-k="x"></label>
@@ -75,9 +89,12 @@
     <details>
       <summary>Оформление текста</summary>
       <div class="row">
-        <label>Цвет артикула/даты <input id="colPrefix" type="color" value="#2b3fbf"></label>
-        <label>Цвет номера <input id="colNumber" type="color" value="#1e9e3e"></label>
+        <label>Цвет артикула/даты <input id="colPrefix" type="color" value="#000000"></label>
+        <label>Цвет номера <input id="colNumber" type="color" value="#000000"></label>
         <label>Номер крупнее в <input id="numScale" type="number" step="0.1" min="1" max="3" value="1.7"> раза</label>
+      </div>
+      <div class="row">
+        <label>Текст под кодом, % <input id="codeTextPct" type="number" step="5" min="40" max="100" value="70"></label>
       </div>
       <div class="row">
         <label>Выравнивание на этикетке
@@ -104,6 +121,7 @@
     <div id="codesInfo" class="muted">Файл кодов не загружен</div>
     <div id="codesProblems"></div>
     <p class="muted small">На этикетке будет: <b id="sampleText">—</b></p>
+    <button id="btnCheckThese" class="ghost" hidden>Проверить эти коды в «Честном знаке»</button>
   </div>
 
   <div class="card actions">
@@ -128,7 +146,56 @@
 </section>
 </main>
 
+
+<main id="tab-check" class="single" hidden>
+  <section class="col">
+    <div class="card">
+      <h2>Проверка кодов в «Честном знаке»</h2>
+      <p class="muted">Перед отправкой на маркетплейс убедитесь, что все коды <b>введены в оборот</b> и не выбыли.
+        Проверка идёт через тот же открытый сервис, что и у приложения «Честный знак» для покупателей, без входа в личный кабинет.</p>
+      <div id="connBox" class="muted small">Проверяю подключение…</div>
+      <label class="file">Файлы с кодами: PDF из «Честного знака», Excel (.xlsx), CSV или TXT. Можно сразу несколько.
+        <input id="chkFiles" type="file" accept=".pdf,.xlsx,.xlsm,.csv,.txt" multiple>
+      </label>
+      <details>
+        <summary>…или вставить коды списком</summary>
+        <textarea id="chkPaste" rows="5" placeholder="по одному коду в строке"></textarea>
+        <button id="btnPaste" class="ghost">Добавить из списка</button>
+      </details>
+      <div id="chkLoaded" class="muted"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="btnCheck" class="primary" disabled>Проверить</button>
+      </div>
+      <div class="row">
+        <button id="btnStop" class="ghost" hidden>Остановить</button>
+        <button id="btnRetry" class="ghost" hidden>Повторить с ошибками связи</button>
+        <button id="btnReport" class="ghost" hidden>Скачать отчёт (CSV)</button>
+        <button id="btnClearChk" class="ghost danger" hidden>Очистить</button>
+      </div>
+      <div id="chkProgress" class="progress" hidden><div></div></div>
+      <div id="chkSummary"></div>
+      <details>
+        <summary>Настройки подключения</summary>
+        <div class="row">
+          <label class="grow">Адрес сервиса (пусто = автоматически)
+            <input id="chkBase" placeholder="например https://ваш-сайт.ru/crpt">
+          </label>
+          <label>Пауза между запросами, мс <input id="chkPause" type="number" min="0" step="50" value="300"></label>
+        </div>
+      </details>
+    </div>
+    <div class="card">
+      <table class="results">
+        <thead><tr><th>№</th><th>Откуда</th><th>Код</th><th>Результат</th><th>Подробности</th></tr></thead>
+        <tbody id="chkTable"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
 <script src="lib/pdf-lib.min.js"></script>
+<script src="datamatrix.js"></script>
+<script src="checker.js"></script>
 <script src="core.js"></script>
 <script src="app.js"></script>
 </body>

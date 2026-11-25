@@ -4,18 +4,26 @@
   const Core = window.LabelCore;
   const $ = (id) => document.getElementById(id);
 
+  // Раскладки для этикетки 75×120 мм. Свободное место справа от рисунка: x 39–73 мм, y 2–38 мм.
+  const PRESETS = {
+    max: { code: { x: 39.5, y: 2, w: 33.5, h: 36.3 }, info: { x: 2, y: 2, w: 15.5, h: 10.5 } },
+    mockup: { code: { x: 39.5, y: 9.5, w: 34, h: 28.8 }, info: { x: 30.5, y: 1.5, w: 43, h: 7.5 } },
+  };
   const DEFAULT_ZONES = {
-    code: { x: 49, y: 13.5, w: 23, h: 23.5 },
-    info: { x: 33, y: 1.5, w: 39, h: 9 },
+    code: Object.assign({}, PRESETS.max.code),
+    info: Object.assign({}, PRESETS.max.info),
     codeInfo: { x: 1.5, y: 1.5, w: 32, h: 12 },
   };
-  const DEFAULT_STYLE = { prefixColor: '#2b3fbf', numberColor: '#1e9e3e', numberScale: 1.7, alignLabel: 'left', layoutCode: 'auto' };
+  const DEFAULT_STYLE = { prefixColor: '#000000', numberColor: '#000000', numberScale: 1.7, alignLabel: 'left', layoutCode: 'auto', codeTextPct: 70, zonePreset: 'max' };
+  // старые значения по умолчанию (первая версия) — для автоматического обновления сохранённых товаров
+  const OLD_ZONES = { code: { x: 49, y: 13.5, w: 23, h: 23.5 }, info: { x: 33, y: 1.5, w: 39, h: 9 } };
 
   const state = {
     profiles: new Map(),
     zones: JSON.parse(JSON.stringify(DEFAULT_ZONES)),
     template: null, // {kind, bytes, fileName, widthMm, heightMm}
     codes: null, // {bytes, fileName, analysis, reused:[]}
+    checkResults: new Map(), // полный код -> вердикт проверки в ЧЗ
     previewUrls: [],
     busy: false,
   };
@@ -95,12 +103,15 @@
       numberScale: Math.max(1, parseFloat($('numScale').value) || 1.7),
       alignLabel: $('alignLabel').value,
       layoutCode: $('layoutCode').value,
+      codeTextPct: Math.min(100, Math.max(30, parseFloat($('codeTextPct').value) || 70)),
+      zonePreset: $('zonePreset').value,
     };
   }
   function writeStyle(st) {
     const s = Object.assign({}, DEFAULT_STYLE, st || {});
     $('colPrefix').value = s.prefixColor; $('colNumber').value = s.numberColor;
     $('numScale').value = s.numberScale; $('alignLabel').value = s.alignLabel; $('layoutCode').value = s.layoutCode;
+    $('codeTextPct').value = s.codeTextPct; $('zonePreset').value = s.zonePreset || 'custom';
   }
   const article = () => $('article').value.trim();
   const startNum = () => Math.max(1, parseInt($('startNum').value, 10) || 1);
@@ -151,7 +162,21 @@
     return p;
   }
 
+  /** Обновить товары, сохранённые в первой версии: цветной текст -> чёрный, маленький код -> крупный */
+  function migrateProfile(p) {
+    const st = Object.assign({}, p.style || {});
+    if (st.prefixColor === '#2b3fbf') st.prefixColor = '#000000';
+    if (st.numberColor === '#1e9e3e') st.numberColor = '#000000';
+    const z = JSON.parse(JSON.stringify(p.zones || {}));
+    const same = (a, b) => a && b && ['x', 'y', 'w', 'h'].every((k) => Math.abs(a[k] - b[k]) < 0.01);
+    if (same(z.code, OLD_ZONES.code) && same(z.info, OLD_ZONES.info)) { z.code = Object.assign({}, PRESETS.max.code); z.info = Object.assign({}, PRESETS.max.info); st.zonePreset = 'max'; }
+    if (!st.zonePreset) st.zonePreset = 'custom';
+    if (!st.codeTextPct) st.codeTextPct = 70;
+    return Object.assign({}, p, { style: st, zones: z });
+  }
+
   function loadProfile(p) {
+    p = migrateProfile(p);
     $('productName').value = p.name || '';
     state.zones = Object.assign(JSON.parse(JSON.stringify(DEFAULT_ZONES)), JSON.parse(JSON.stringify(p.zones || {})));
     writeZonesToForm();
@@ -282,6 +307,12 @@
     if (a.duplicates.length) {
       add('err', `<b>Одинаковые коды внутри файла (${a.duplicates.length})!</b> Формирование запрещено.<ul>${a.duplicates.slice(0, 10).map((d) => `<li>стр. ${d.pages.join(' и ')}: ${esc(d.code)}</li>`).join('')}</ul>`);
     }
+    if (a.mismatch && a.mismatch.length) {
+      add('err', `<b>На стр. ${a.mismatch.slice(0, 15).join(', ')} код внутри DataMatrix не совпадает с текстом под ним!</b> Формирование запрещено — проверьте файл в «Честном знаке».`);
+    }
+    if (a.unreadable && a.unreadable.length && !a.notFound.length) {
+      add('warn', `На стр. ${a.unreadable.slice(0, 15).join(', ')}${a.unreadable.length > 15 ? '…' : ''} не удалось прочитать DataMatrix — эти коды нельзя будет проверить в ЧЗ.`);
+    }
     if (a.notFound.length) {
       add('warn', `На стр. ${a.notFound.slice(0, 15).join(', ')}${a.notFound.length > 15 ? '…' : ''} не удалось найти DataMatrix автоматически — будет вставлена страница целиком. Проверьте предпросмотр.`);
     }
@@ -289,9 +320,16 @@
       const r = state.codes.reused;
       add('warn', `<b>${r.length} код(ов) уже печатались раньше</b> (например: № ${r[0].number}, ${esc(r[0].article)}, ${esc(r[0].date)}). Если это повторная печать той же партии — всё в порядке.`);
     }
-    if (!a.duplicates.length && !a.notFound.length && !state.codes.reused.length) {
-      add('ok', 'Все коды уникальны, DataMatrix найден на каждой странице.');
+    if (!a.duplicates.length && !a.notFound.length && !state.codes.reused.length && !(a.mismatch || []).length && !(a.unreadable || []).length) {
+      add('ok', 'Все коды уникальны, каждый DataMatrix прочитан и совпадает с текстом под ним.');
     }
+    const chk = checkSummaryFor(a);
+    if (chk.checked) {
+      add(chk.bad ? 'err' : 'ok', chk.bad
+        ? `<b>Проверка в ЧЗ: ${chk.bad} из ${a.pageCount} кодов не годятся</b> (не введены в оборот, выбыли или не найдены). Подробности — на вкладке «Проверка кодов».`
+        : `Проверка в ЧЗ: проверено ${chk.checked} из ${a.pageCount}, все в обороте.`);
+    }
+    $('btnCheckThese').hidden = false;
   }
 
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -303,7 +341,7 @@
     $('rangeText').textContent = n ? `${s} – ${s + n - 1}` : `${s} – …`;
     const date = Core.formatDate($('packDate').value);
     $('sampleText').textContent = `${Core.safeText(article()) || 'артикул'} ${date} ${s}`;
-    const ok = !!(article() && state.template && state.codes && !state.codes.analysis.duplicates.length && $('packDate').value && !state.busy);
+    const ok = !!(article() && state.template && state.codes && !state.codes.analysis.duplicates.length && !(state.codes.analysis.mismatch || []).length && $('packDate').value && !state.busy);
     $('btnGenerate').disabled = !ok;
     $('btnGenerate').title = ok ? '' : 'Нужно: артикул, шаблон, дата и файл кодов без дублей';
   }
@@ -322,7 +360,7 @@
       article: article() || 'artikul',
       dateIso: $('packDate').value,
       start: startNum(),
-      labelStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: st.alignLabel, layout: 'one' },
+      labelStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: st.alignLabel, layout: 'auto', codeTextScale: st.codeTextPct / 100 },
       codeStyle: { prefixColor: st.prefixColor, numberColor: st.numberColor, numberScale: st.numberScale, align: 'center', layout: st.layoutCode },
     }, extra || {});
   }
@@ -378,6 +416,9 @@
     if (!state.codes || !state.template) return;
     const a = state.codes.analysis;
     if (a.duplicates.length) { alert('В файле есть одинаковые коды — формирование запрещено.'); return; }
+    const chk = checkSummaryFor(a);
+    if (chk.bad && !confirm(`По результатам проверки в «Честном знаке» ${chk.bad} код(ов) из этого файла НЕ годятся (не в обороте, выбыли или не найдены).\nВсё равно сформировать?`)) return;
+    if (!chk.checked && !confirm('Коды этого файла ещё не проверены в «Честном знаке».\nСформировать без проверки?')) return;
     if (state.codes.reused.length && !confirm(`${state.codes.reused.length} код(ов) из этого файла уже печатались раньше.\nЭто повторная печать? Продолжить?`)) return;
 
     state.busy = true; updateDerived();
@@ -464,6 +505,188 @@
     } catch (e) { alert('Не удалось восстановить: ' + e.message); }
   }
 
+  function checkSummaryFor(a) {
+    let checked = 0; let bad = 0;
+    a.pages.forEach((p) => {
+      const r = p.fullCode ? state.checkResults.get(p.fullCode) : null;
+      if (r && r.level !== 'error') { checked++; if (r.level !== 'ok') bad++; }
+    });
+    return { checked, bad };
+  }
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+    $('tab-labels').hidden = name !== 'labels';
+    $('tab-check').hidden = name !== 'check';
+    if (name === 'labels' && state.codes) renderCodeProblems();
+  }
+
+  // ---------------- проверка кодов в ЧЗ ----------------
+  const CC = window.CodeChecker;
+  const LEVEL_RU = { ok: 'Годен', bad: 'НЕ годен', warn: 'Внимание', error: 'Не проверен', wait: 'ждёт' };
+  const Check = {
+    items: [], results: [], running: false, stop: false, base: null, mode: '', preferred: null,
+
+    async init() {
+      $('chkFiles').addEventListener('change', (e) => this.loadFiles([...e.target.files]));
+      $('btnPaste').addEventListener('click', () => {
+        const list = CC.codesFromText($('chkPaste').value);
+        this.addItems(list, 'список'); $('chkPaste').value = '';
+      });
+      $('btnCheck').addEventListener('click', () => this.run(false));
+      $('btnRetry').addEventListener('click', () => this.run(true));
+      $('btnStop').addEventListener('click', () => { this.stop = true; });
+      $('btnReport').addEventListener('click', () => this.report());
+      $('btnClearChk').addEventListener('click', () => { this.items = []; this.results = []; this.render(); });
+      $('chkBase').addEventListener('change', () => this.detect());
+      await this.detect();
+    },
+
+    async detect() {
+      const custom = $('chkBase').value.trim();
+      const box = $('connBox');
+      if (custom) { this.base = custom.replace(/\/+$/, ''); this.mode = 'custom'; box.className = 'muted small'; box.textContent = `Запросы идут через: ${this.base}`; return; }
+      if (/^https?:/.test(location.protocol)) {
+        try {
+          const r = await fetch('/crpt/ping', { cache: 'no-store' });
+          if (r.ok) { this.base = '/crpt'; this.mode = 'helper'; box.className = 'ok'; box.textContent = 'Подключено через программу-посредник на этом компьютере — можно проверять.'; return; }
+        } catch (e) { /* нет посредника */ }
+      }
+      this.base = CC.PUBLIC_BASE; this.mode = 'direct';
+      box.className = 'warn';
+      box.innerHTML = 'Приложение открыто как файл, поэтому браузер, скорее всего, не пустит запросы к «Честному знаку» напрямую. '
+        + 'Для проверки запустите <b>start.bat</b> из папки программы (нужен бесплатный Node.js) — откроется эта же страница, и проверка заработает. '
+        + 'Можно попробовать и так — если не получится, появится ошибка связи.';
+    },
+
+    async loadFiles(files) {
+      for (const f of files) {
+        $('chkLoaded').textContent = `Читаю ${f.name}…`;
+        try {
+          const bytes = new Uint8Array(await f.arrayBuffer());
+          const list = await CC.readFile(f.name, bytes, Core, (i, n) => { $('chkLoaded').textContent = `Читаю ${f.name}… ${i} / ${n}`; });
+          this.addItems(list, f.name);
+        } catch (e) { alert(`${f.name}: ${e.message}`); }
+      }
+      $('chkFiles').value = '';
+    },
+
+    loadItems(list, name) { this.items = []; this.results = []; this.addItems(list, name); },
+
+    addItems(list, name) {
+      const seen = new Set(this.items.map((i) => i.code).filter(Boolean));
+      let dup = 0;
+      list.forEach((it) => {
+        if (it.code && seen.has(it.code)) { dup++; return; }
+        if (it.code) seen.add(it.code);
+        this.items.push(Object.assign({ file: name }, it));
+        this.results.push(it.code && state.checkResults.has(it.code) ? state.checkResults.get(it.code) : null);
+      });
+      $('chkLoaded').textContent = `Загружено кодов: ${this.items.length}${dup ? ` (повторы пропущены: ${dup})` : ''}`;
+      if (!list.length) $('chkLoaded').textContent = `В «${name}» не найдено кодов маркировки.`;
+      this.render();
+    },
+
+    async run(onlyErrors) {
+      if (this.running || !this.items.length) return;
+      this.running = true;
+      $('btnCheck').disabled = true; $('btnReport').hidden = true;
+      await this.detect();
+      const idx = this.items.map((_, i) => i).filter((i) => !onlyErrors ? true : (!this.results[i] || this.results[i].level === 'error'));
+      if (!idx.length) { this.running = false; this.render(); return; }
+      this.stop = false;
+      idx.forEach((i) => { this.results[i] = { level: 'wait', title: 'в очереди' }; });
+      this.render();
+      $('chkProgress').hidden = false;
+      let done = 0;
+      let fatal = null;
+      this.preferred = await CC.checkMany(idx.map((i) => this.items[i]), {
+        base: this.base, preferred: this.preferred, concurrency: 2,
+        pauseMs: Math.max(0, parseInt($('chkPause').value, 10) || 0),
+        shouldStop: () => this.stop || !!fatal,
+        onFatal: (r) => { fatal = r; },
+        onResult: (k, res) => {
+          const i = idx[k];
+          this.results[i] = res;
+          if (this.items[i].code && res.level !== 'error') state.checkResults.set(this.items[i].code, res);
+          done++;
+          $('chkProgress').firstElementChild.style.width = `${Math.round((done / idx.length) * 100)}%`;
+          this.renderRow(i); this.renderSummary();
+          if (res.net && done === 1 && this.mode === 'direct') {
+            $('connBox').className = 'err';
+            $('connBox').innerHTML = 'Браузер не пускает запросы к «Честному знаку» напрямую. Запустите <b>start.bat</b> из папки программы и проверяйте на открывшейся странице.';
+            this.stop = true;
+          }
+        },
+      });
+      idx.forEach((i) => { if (this.results[i] && this.results[i].level === 'wait') this.results[i] = null; });
+      if (fatal) alert(fatal.title + '\nПроверка возможна только с российского интернета (без VPN).');
+      this.running = false;
+      setTimeout(() => { $('chkProgress').hidden = true; }, 600);
+      this.render();
+    },
+
+    renderRow(i) {
+      const tr = document.getElementById('chk-row-' + i);
+      if (!tr) return;
+      const it = this.items[i]; const r = this.results[i];
+      const lvl = r ? r.level : 'wait';
+      const extra = [r && r.status && r.status !== r.title ? r.status : '', r && r.product, r && r.details, (it.notes || []).join(', ')].filter(Boolean).join(' · ');
+      tr.innerHTML = `<td>${i + 1}</td><td>${esc(it.file || '')}<br><span class="muted">${esc(it.source || '')}</span></td>`
+        + `<td class="code">${esc(CC.display(it.code || it.cis || ''))}</td>`
+        + `<td><span class="lvl ${lvl}">${LEVEL_RU[lvl]}</span><br>${esc(r ? r.title : (it.code ? 'не проверен' : 'код не прочитан'))}</td>`
+        + `<td class="small">${esc(extra)}</td>`;
+    },
+
+    renderSummary() {
+      const c = { ok: 0, bad: 0, warn: 0, error: 0, none: 0 };
+      this.results.forEach((r) => { if (!r || r.level === 'wait') c.none++; else c[r.level]++; });
+      const parts = [];
+      if (c.ok) parts.push(`<span class="lvl ok">В обороте: ${c.ok}</span>`);
+      if (c.bad) parts.push(`<span class="lvl bad">НЕ годны: ${c.bad}</span>`);
+      if (c.warn) parts.push(`<span class="lvl warn">Требуют внимания: ${c.warn}</span>`);
+      if (c.error) parts.push(`<span class="lvl error">Ошибка связи: ${c.error}</span>`);
+      if (c.none) parts.push(`<span class="lvl wait">Не проверено: ${c.none}</span>`);
+      let verdict = '';
+      if (this.items.length && !c.none && !c.error && !this.running) {
+        verdict = c.bad || c.warn ? '<div class="err"><b>Есть коды, которые нельзя отправлять.</b> Отфильтруйте их по столбцу «Результат» или скачайте отчёт.</div>'
+          : '<div class="ok"><b>Все коды введены в оборот — можно отправлять.</b></div>';
+      }
+      $('chkSummary').innerHTML = `<div class="sum">${parts.join('')}</div>${verdict}`;
+    },
+
+    render() {
+      const tb = $('chkTable');
+      // показываем сначала проблемные
+      const order = this.items.map((_, i) => i);
+      const rank = { bad: 0, warn: 1, error: 2, wait: 3, ok: 4 };
+      if (!this.running) order.sort((a, b) => (rank[(this.results[a] || { level: 'wait' }).level] - rank[(this.results[b] || { level: 'wait' }).level]) || a - b);
+      tb.innerHTML = order.map((i) => `<tr id="chk-row-${i}"></tr>`).join('');
+      order.forEach((i) => this.renderRow(i));
+      this.renderSummary();
+      const has = this.items.length > 0;
+      $('btnCheck').disabled = !has || this.running;
+      $('btnStop').hidden = !this.running;
+      $('btnReport').hidden = !has || this.running;
+      $('btnClearChk').hidden = !has || this.running;
+      $('btnRetry').hidden = this.running || !this.results.some((r) => r && r.level === 'error');
+    },
+
+    report() {
+      const rows = [['№', 'Файл', 'Откуда', 'Код маркировки', 'Результат', 'Статус ЧЗ', 'Пояснение', 'Товар', 'Подробности', 'Ответ сервера']];
+      this.items.forEach((it, i) => {
+        const r = this.results[i] || {};
+        rows.push([String(i + 1), it.file || '', it.source || '', CC.display(it.code || it.cis || ''), LEVEL_RU[r.level || 'wait'], r.status || '', r.title || '', r.product || '', r.details || '', (r.raw || '').replace(/\s+/g, ' ')]);
+      });
+      const escv = (v) => (/[;"\n]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : v);
+      const csv = '\uFEFF' + rows.map((r) => r.map(escv).join(';')).join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = `проверка_кодов_${todayIso()}.csv`;
+      a.click();
+    },
+  };
+
   // ---------------- события ----------------
   async function init() {
     writeZonesToForm();
@@ -489,8 +712,21 @@
       if (state.template && state.template.kind !== 'pdf') { state.template.widthMm = parseFloat($('tplW').value) || 75; state.template.heightMm = parseFloat($('tplH').value) || 120; showTemplateInfo(); }
       schedulePreview();
     }));
-    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #numScale, #alignLabel, #layoutCode, #showFrames')
+    document.querySelectorAll('.zone input, #colPrefix, #colNumber, #numScale, #alignLabel, #layoutCode, #showFrames, #codeTextPct')
       .forEach((el) => el.addEventListener('input', schedulePreview));
+    document.querySelectorAll('.zone input').forEach((el) => el.addEventListener('input', () => { $('zonePreset').value = 'custom'; }));
+    $('zonePreset').addEventListener('change', () => {
+      const pr = PRESETS[$('zonePreset').value];
+      if (pr) { state.zones.code = Object.assign({}, pr.code); state.zones.info = Object.assign({}, pr.info); writeZonesToForm(); }
+      schedulePreview();
+    });
+    $('btnCheckThese').addEventListener('click', () => {
+      if (!state.codes) return;
+      switchTab('check');
+      Check.loadItems(state.codes.analysis.pages.map((p, i) => ({ code: p.fullCode, cis: p.code, source: `стр. ${i + 1}`, notes: p.fullCode ? [] : [p.dmError || 'не прочитан'] })), state.codes.fileName);
+    });
+    document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    Check.init();
     ['packDate', 'startNum'].forEach((id) => $(id).addEventListener('input', () => { updateDerived(); schedulePreview(); }));
     $('btnResetZones').addEventListener('click', () => { state.zones = JSON.parse(JSON.stringify(DEFAULT_ZONES)); writeZonesToForm(); writeStyle(DEFAULT_STYLE); schedulePreview(); });
     $('btnGenerate').addEventListener('click', generate);
