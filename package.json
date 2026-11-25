@@ -1,0 +1,13 @@
+{
+  "name": "pdf-editor-labels",
+  "version": "1.0.0",
+  "description": "Вставка кодов маркировки «Честный знак» в этикетки и нумерация для внешней упаковки",
+  "private": true,
+  "scripts": {
+    "test": "node tests/verify.js"
+  },
+  "devDependencies": {
+    "pdf-lib": "1.17.1"
+  },
+  "license": "MIT"
+}

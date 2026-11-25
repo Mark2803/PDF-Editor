@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Этикетки + Честный знак</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Этикетки + коды «Честный знак»</h1>
+  <div class="hdr-actions">
+    <button id="btnExport" class="ghost" title="Сохранить все товары, шаблоны и настройки в файл">Резервная копия</button>
+    <label class="ghost btn" title="Загрузить товары и настройки из файла">Восстановить<input id="fileImport" type="file" accept=".json" hidden></label>
+  </div>
+</header>
+
+<main>
+<section class="col form">
+
+  <div class="card">
+    <h2>1. Товар</h2>
+    <div class="row">
+      <label class="grow">Артикул
+        <input id="article" list="articleList" placeholder="начните вводить, напр. shu50" autocomplete="off">
+        <datalist id="articleList"></datalist>
+      </label>
+      <label class="grow">Название (для себя)
+        <input id="productName" placeholder="Смола Шу пуэра 50 шт">
+      </label>
+    </div>
+    <div class="row">
+      <button id="btnSaveProfile">Сохранить товар</button>
+      <button id="btnDeleteProfile" class="ghost danger">Удалить товар</button>
+      <span id="profileStatus" class="muted"></span>
+    </div>
+    <p id="articleWarn" class="warn" hidden></p>
+  </div>
+
+  <div class="card">
+    <h2>2. Шаблон этикетки</h2>
+    <label class="file">Файл шаблона (PDF — лучше всего; PNG/JPG — от 300 dpi)
+      <input id="tplFile" type="file" accept=".pdf,.png,.jpg,.jpeg">
+    </label>
+    <div id="tplInfo" class="muted">Шаблон не загружен</div>
+    <div class="row" id="tplSizeRow">
+      <label>Ширина, мм <input id="tplW" type="number" step="0.5" value="75"></label>
+      <label>Высота, мм <input id="tplH" type="number" step="0.5" value="120"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. Где печатать (мм от левого верхнего угла)</h2>
+    <h3><span class="sw red"></span>Код маркировки на этикетке</h3>
+    <div class="row zone" data-zone="code">
+      <label>X <input type="number" step="0.5" data-k="x"></label>
+      <label>Y <input type="number" step="0.5" data-k="y"></label>
+      <label>Ширина <input type="number" step="0.5" data-k="w"></label>
+      <label>Высота <input type="number" step="0.5" data-k="h"></label>
+    </div>
+    <h3><span class="sw blue"></span>Артикул, дата, номер на этикетке</h3>
+    <div class="row zone" data-zone="info">
+      <label>X <input type="number" step="0.5" data-k="x"></label>
+      <label>Y <input type="number" step="0.5" data-k="y"></label>
+      <label>Ширина <input type="number" step="0.5" data-k="w"></label>
+      <label>Высота <input type="number" step="0.5" data-k="h"></label>
+    </div>
+    <h3><span class="sw blue"></span>Артикул, дата, номер на странице кода (для внешней упаковки)</h3>
+    <div class="row zone" data-zone="codeInfo">
+      <label>X <input type="number" step="0.5" data-k="x"></label>
+      <label>Y <input type="number" step="0.5" data-k="y"></label>
+      <label>Ширина <input type="number" step="0.5" data-k="w"></label>
+      <label>Высота <input type="number" step="0.5" data-k="h"></label>
+    </div>
+    <details>
+      <summary>Оформление текста</summary>
+      <div class="row">
+        <label>Цвет артикула/даты <input id="colPrefix" type="color" value="#2b3fbf"></label>
+        <label>Цвет номера <input id="colNumber" type="color" value="#1e9e3e"></label>
+        <label>Номер крупнее в <input id="numScale" type="number" step="0.1" min="1" max="3" value="1.7"> раза</label>
+      </div>
+      <div class="row">
+        <label>Выравнивание на этикетке
+          <select id="alignLabel"><option value="left">слева</option><option value="center">по центру</option><option value="right">справа</option></select>
+        </label>
+        <label>Раскладка на странице кода
+          <select id="layoutCode"><option value="auto">авто</option><option value="one">в одну строку</option><option value="two">в две строки</option></select>
+        </label>
+      </div>
+      <button id="btnResetZones" class="ghost">Вернуть зоны по умолчанию</button>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>4. Партия</h2>
+    <div class="row">
+      <label>Дата фасовки <input id="packDate" type="date"></label>
+      <label>Начальный номер <input id="startNum" type="number" min="1" step="1" value="1"></label>
+      <div class="range-box"><span class="muted">Номера</span><b id="rangeText">—</b></div>
+    </div>
+    <label class="file">Файл кодов из «Честного знака» (PDF)
+      <input id="codesFile" type="file" accept=".pdf">
+    </label>
+    <div id="codesInfo" class="muted">Файл кодов не загружен</div>
+    <div id="codesProblems"></div>
+    <p class="muted small">На этикетке будет: <b id="sampleText">—</b></p>
+  </div>
+
+  <div class="card actions">
+    <button id="btnGenerate" class="primary" disabled>Сформировать этикетки и коды</button>
+    <div id="progress" class="progress" hidden><div></div></div>
+    <div id="results"></div>
+  </div>
+</section>
+
+<section class="col preview">
+  <div class="card sticky">
+    <div class="row between">
+      <h2>Предпросмотр (1-я страница)</h2>
+      <label class="inline"><input id="showFrames" type="checkbox" checked> рамки зон</label>
+    </div>
+    <div class="previews">
+      <figure><figcaption>Этикетка</figcaption><iframe id="pvLabel" title="Этикетка"></iframe></figure>
+      <figure><figcaption>Код для внешней упаковки</figcaption><iframe id="pvCode" title="Код"></iframe></figure>
+    </div>
+    <p class="muted small">Рамки видны только в предпросмотре и в итоговые файлы не попадают.</p>
+  </div>
+</section>
+</main>
+
+<script src="lib/pdf-lib.min.js"></script>
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
