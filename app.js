@@ -548,8 +548,8 @@
       if (custom) { this.base = custom.replace(/\/+$/, ''); this.mode = 'custom'; box.className = 'muted small'; box.textContent = `Запросы идут через: ${this.base}`; return; }
       if (/^https?:/.test(location.protocol)) {
         try {
-          const r = await fetch('/crpt/ping', { cache: 'no-store' });
-          if (r.ok) { this.base = '/crpt'; this.mode = 'helper'; box.className = 'ok'; box.textContent = 'Подключено через программу-посредник на этом компьютере — можно проверять.'; return; }
+          const r = await fetch('crpt/ping', { cache: 'no-store', credentials: 'same-origin' });
+          if (r.ok) { this.base = new URL('crpt', location.href).href; this.mode = 'helper'; box.className = 'ok'; box.textContent = 'Подключено к сервису проверки — можно проверять.'; return; }
         } catch (e) { /* нет посредника */ }
       }
       this.base = CC.PUBLIC_BASE; this.mode = 'direct';

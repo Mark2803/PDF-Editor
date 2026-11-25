@@ -14,6 +14,7 @@
  *   PORT=8787           порт
  *   HOST=127.0.0.1      адрес (0.0.0.0 — если ставите на свой сервер)
  *   CRPT_BASE=https://mobile.api.crpt.ru   адрес сервиса ЧЗ (для тестов)
+ *   BASE_PATH=/tools/labels  если приложение открывается не с корня сайта
  */
 'use strict';
 const http = require('http');
@@ -26,6 +27,7 @@ const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 const CRPT_BASE = process.env.CRPT_BASE || 'https://mobile.api.crpt.ru';
 const ROOT = __dirname;
+const BASE_PATH = (process.env.BASE_PATH || '').replace(/\/+$/, '');
 const ALLOWED = new Set(['/mobile/check', '/v2/mobile/check']);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.md': 'text/plain; charset=utf-8' };
 
@@ -66,6 +68,9 @@ function proxy(req, res, subPath, query) {
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   let p = decodeURIComponent(u.pathname);
+  // работа под префиксом, например /tools/labels/ (BASE_PATH=/tools/labels)
+  if (BASE_PATH && p === BASE_PATH) { res.writeHead(301, { Location: BASE_PATH + '/' }); return res.end(); }
+  if (BASE_PATH && p.startsWith(BASE_PATH + '/')) p = p.slice(BASE_PATH.length);
   if (p === '/crpt/ping') return send(res, 200, JSON.stringify({ ok: true, base: CRPT_BASE }), 'application/json');
   if (p.startsWith('/crpt/')) return proxy(req, res, p.slice('/crpt'.length), u.search);
   if (p === '/') p = '/index.html';
