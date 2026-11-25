@@ -72,3 +72,8 @@ table.results td.code { font-family: ui-monospace, Consolas, monospace; word-bre
 .drop .warn { margin: 4px 0 0; }
 details.advanced > summary { font-weight: 600; margin: 0; }
 details.advanced[open] > summary { margin-bottom: 12px; }
+
+.mode .radio { flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 10px; margin: 4px 0; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text); }
+.mode .radio:has(input:checked) { border-color: var(--accent); background: #f1f3fd; }
+.mode .radio input { margin-top: 3px; }
+.previews:has(> figure[hidden]) { grid-template-columns: minmax(200px, 360px); }

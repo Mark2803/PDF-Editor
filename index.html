@@ -23,6 +23,14 @@
 <main id="tab-labels">
 <section class="col form">
 
+  <div class="card mode">
+    <h2>Что сформировать</h2>
+    <label class="radio"><input type="radio" name="mode" value="labels" checked>
+      <span><b>Этикетки с кодом</b> — код «Честного знака», артикул и номер вклеиваются в потребительскую этикетку; плюс коды для внешней упаковки</span></label>
+    <label class="radio"><input type="radio" name="mode" value="codes">
+      <span><b>Только коды «Честного знака»</b> — на каждый код из файла добавляются артикул, дата и сквозной номер; этикетка не нужна</span></label>
+  </div>
+
   <div class="card">
     <h2>1. Товар и партия</h2>
     <div class="row">
@@ -50,13 +58,13 @@
 
   <div class="card">
     <h2>2. Файлы</h2>
-    <label class="drop" id="dropTpl">
+    <label class="drop only-labels" id="dropTpl">
       <input id="tplFile" type="file" accept=".pdf,.png,.jpg,.jpeg">
       <b>Потребительская этикетка</b>
       <span class="muted small">Перетащите файл сюда или нажмите, чтобы выбрать. PDF — лучше всего; PNG/JPG — от 300 dpi</span>
       <span id="tplInfo" class="muted">Шаблон не загружен</span>
     </label>
-    <div class="row" id="tplSizeRow">
+    <div class="row only-labels" id="tplSizeRow">
       <label>Ширина этикетки, мм <input id="tplW" type="number" step="0.5" value="75"></label>
       <label>Высота, мм <input id="tplH" type="number" step="0.5" value="120"></label>
     </div>
@@ -78,6 +86,7 @@
 
   <details class="card advanced">
     <summary>Настройки раскладки (обычно менять не нужно)</summary>
+    <div class="only-labels">
     <h3><span class="sw red"></span>Код маркировки на этикетке, мм от левого верхнего угла</h3>
     <div class="row zone" data-zone="code">
       <label>X <input type="number" step="0.5" data-k="x"></label>
@@ -92,7 +101,8 @@
       <label>Ширина <input type="number" step="0.5" data-k="w"></label>
       <label>Высота <input type="number" step="0.5" data-k="h"></label>
     </div>
-    <h3>Бумажка кода для внешней упаковки</h3>
+    </div>
+    <h3>Бумажка кода</h3>
     <div class="row">
       <label>Ширина, мм <input id="paperW" type="number" step="1" min="10" value="20"></label>
       <label>Высота, мм <input id="paperH" type="number" step="1" min="10" value="30"></label>
@@ -130,8 +140,8 @@
       <label class="inline"><input id="showFrames" type="checkbox" checked> рамки зон</label>
     </div>
     <div class="previews">
-      <figure><figcaption>Этикетка</figcaption><iframe id="pvLabel" title="Этикетка"></iframe></figure>
-      <figure><figcaption>Код для внешней упаковки (бумажка)</figcaption><iframe id="pvCode" title="Код"></iframe></figure>
+      <figure class="only-labels"><figcaption>Этикетка</figcaption><iframe id="pvLabel" title="Этикетка"></iframe></figure>
+      <figure><figcaption id="pvCodeCap">Код для внешней упаковки (бумажка)</figcaption><iframe id="pvCode" title="Код"></iframe></figure>
     </div>
     <p class="muted small">Рамки видны только в предпросмотре и в итоговые файлы не попадают.</p>
   </div>

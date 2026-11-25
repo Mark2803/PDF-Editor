@@ -347,9 +347,10 @@
     $('rangeText').textContent = n ? `${s} – ${s + n - 1}` : `${s} – …`;
     const date = Core.formatDate($('packDate').value);
     $('sampleText').textContent = `${Core.safeText(article()) || 'артикул'} ${date} ${s}`;
-    const ok = !!(article() && state.template && state.codes && !state.codes.analysis.duplicates.length && !(state.codes.analysis.mismatch || []).length && $('packDate').value && !state.busy);
+    const needTpl = mode() === 'labels';
+    const ok = !!(article() && (state.template || !needTpl) && state.codes && !state.codes.analysis.duplicates.length && !(state.codes.analysis.mismatch || []).length && $('packDate').value && !state.busy);
     $('btnGenerate').disabled = !ok;
-    $('btnGenerate').title = ok ? '' : 'Нужно: артикул, шаблон, дата и файл кодов без дублей';
+    $('btnGenerate').title = ok ? '' : (needTpl ? 'Нужно: артикул, шаблон, дата и файл кодов без дублей' : 'Нужно: артикул, дата и файл кодов без дублей');
   }
 
   function buildOpts(extra) {
@@ -381,11 +382,11 @@
     const o = buildOpts();
     const frames = $('showFrames').checked;
     try {
-      const lab = await Core.buildLabels({
+      const lab = mode() === 'labels' ? await Core.buildLabels({
         template: o.template, codesBytes: o.codesBytes, analysis: o.analysis,
         zones: { code: state.zones.code, info: state.zones.info },
         article: o.article, dateIso: o.dateIso, start: o.start, style: o.labelStyle, limit: 1, showFrames: frames,
-      });
+      }) : null;
       let code = null;
       if (o.codesBytes) {
         code = await Core.buildCodes({
@@ -403,7 +404,7 @@
         iframe.removeAttribute('srcdoc');
         iframe.src = u + '#toolbar=0&navpanes=0&view=Fit';
       };
-      show($('pvLabel'), lab);
+      if (lab) show($('pvLabel'), lab);
       show($('pvCode'), code);
     } catch (e) {
       console.error(e);
@@ -420,7 +421,8 @@
   function safeFileName(s) { return String(s).replace(/[\\/:*?"<>|]+/g, '_'); }
 
   async function generate() {
-    if (!state.codes || !state.template) return;
+    const withLabels = mode() === 'labels';
+    if (!state.codes || (withLabels && !state.template)) return;
     const a = state.codes.analysis;
     if (a.duplicates.length) { alert('В файле есть одинаковые коды — формирование запрещено.'); return; }
     const chk = checkSummaryFor(a);
@@ -435,29 +437,30 @@
     const n = a.pageCount;
     const end = o.start + n - 1;
     try {
-      const labels = await Core.buildLabels({
+      const labels = withLabels ? await Core.buildLabels({
         template: o.template, codesBytes: o.codesBytes, analysis: a,
         zones: { code: state.zones.code, info: state.zones.info },
         article: o.article, dateIso: o.dateIso, start: o.start, style: o.labelStyle,
         onProgress: (i) => setProgress((i / n) * 0.6),
-      });
+      }) : null;
+      const p0 = withLabels ? 0.6 : 0;
       const codes = await Core.buildCodes({
         codesBytes: o.codesBytes, analysis: a, paper: o.paper,
         article: o.article, dateIso: o.dateIso, start: o.start, style: o.codeStyle,
-        onProgress: (i) => setProgress(0.6 + (i / n) * 0.35),
+        onProgress: (i) => setProgress(p0 + (i / n) * (0.95 - p0)),
       });
       const csv = Core.buildJournalCsv(a, { article: o.article, dateIso: o.dateIso, start: o.start });
       setProgress(1);
 
       const base = safeFileName(`${Core.safeText(o.article)}_${Core.formatDate(o.dateIso)}_${o.start}-${end}`);
       const files = [
-        { name: `${base}_этикетки.pdf`, bytes: labels, type: 'application/pdf', text: `Этикетки (${n} стр.)` },
-        { name: `${base}_коды.pdf`, bytes: codes, type: 'application/pdf', text: `Коды для внешней упаковки (${n} стр.)` },
+        withLabels ? { name: `${base}_этикетки.pdf`, bytes: labels, type: 'application/pdf', text: `Этикетки (${n} стр.)` } : null,
+        { name: `${base}_коды.pdf`, bytes: codes, type: 'application/pdf', text: withLabels ? `Коды для внешней упаковки (${n} стр.)` : `Коды «Честного знака» с артикулом и номером (${n} стр.)` },
         { name: `${base}_журнал.csv`, bytes: new TextEncoder().encode(csv), type: 'text/csv;charset=utf-8', text: 'Журнал: номер ↔ код (Excel/CSV)' },
-      ];
+      ].filter(Boolean);
       const url = (f) => URL.createObjectURL(new Blob([f.bytes], { type: f.type }));
       const zipUrl = URL.createObjectURL(new Blob([makeZip(files)], { type: 'application/zip' }));
-      $('results').innerHTML = `<div class="ok">Готово: ${n} этикеток и ${n} кодов, номера ${o.start} – ${end}. Скачайте файлы:</div>`
+      $('results').innerHTML = `<div class="ok">Готово: ${withLabels ? `${n} этикеток и ${n} кодов` : `${n} кодов`}, номера ${o.start} – ${end}. Скачайте файлы:</div>`
         + `<a class="dl all" href="${zipUrl}" download="${esc(base)}.zip">⬇ Скачать всё сразу (ZIP)</a>`
         + files.map((f) => `<a class="dl" href="${url(f)}" download="${esc(f.name)}">⬇ ${f.text}</a>`).join('');
       $('results').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -513,6 +516,17 @@
       alert(`Восстановлено товаров: ${profiles.length}, использованных кодов: ${(data.used || []).length}`);
       onArticleChanged();
     } catch (e) { alert('Не удалось восстановить: ' + e.message); }
+  }
+
+  // Режим вкладки: 'labels' — этикетка с кодом + коды для упаковки; 'codes' — только коды с артикулом и номером
+  function mode() { const r = document.querySelector('input[name=mode]:checked'); return r ? r.value : 'labels'; }
+  function applyMode() {
+    const onlyCodes = mode() === 'codes';
+    document.querySelectorAll('.only-labels').forEach((el) => { el.hidden = onlyCodes; });
+    $('btnGenerate').textContent = onlyCodes ? 'Сформировать коды с артикулом и номером' : 'Сформировать этикетки и коды';
+    $('pvCodeCap').textContent = onlyCodes ? 'Код «Честного знака» с артикулом и номером' : 'Код для внешней упаковки (бумажка)';
+    $('results').innerHTML = '';
+    updateDerived(); schedulePreview();
   }
 
   let autosaveTimer = null;
@@ -844,8 +858,9 @@
     $('fileImport').addEventListener('change', (e) => e.target.files[0] && importBackup(e.target.files[0]));
 
     showTemplateInfo();
-    updateDerived();
-    schedulePreview();
+    try { const m = (await idbGetAll('meta')).find((x) => x.key === 'mode'); if (m && m.value === 'codes') document.querySelector('input[name=mode][value=codes]').checked = true; } catch (e) { /* нет */ }
+    document.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener('change', () => { applyMode(); idbPut('meta', { key: 'mode', value: mode() }).catch(() => {}); }));
+    applyMode();
   }
   init();
 })();
