@@ -108,7 +108,7 @@
    $U cp .env.example .env
    DB="$(grep -E '^DATABASE_URL=' /home/ivanc1539/tea-market-v2/backend/.env | cut -d= -f2- | tr -d '"')"
    SS="$($U node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
-   $U sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DB|; s|^SESSION_SECRET=.*|SESSION_SECRET=$SS|" .env
+   printf 'DATABASE_URL=%s\nSESSION_SECRET=%s\n' "$DB" "$SS" >> .env
    chmod 600 .env && ss -ltnp | grep 3400
    ```
    Последняя команда ничего не выводит — порт 3400 свободен.
