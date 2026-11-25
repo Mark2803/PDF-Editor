@@ -1,0 +1,19 @@
+# systemd-служба инструмента «Этикетки и Честный знак».
+# Установка: cp deploy/labels.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now labels
+[Unit]
+Description=Etiketki i Chestny znak (Chainy Master)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ivanc1539
+WorkingDirectory=/home/ivanc1539/pdf-editor
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

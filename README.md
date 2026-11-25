@@ -89,13 +89,60 @@
 (`HOST=0.0.0.0 PORT=8787 node server.js`, лучше за HTTPS и с паролем на уровне веб-сервера), а в
 приложении указать адрес в «Настройках подключения».
 
+## На сайте: раздел «Менеджмент» (tea-master-team.ru)
+
+Адрес: `https://tea-master-team.ru/management/labels/`. Открывается только из админки: «Менеджмент» → PIN →
+карточка «Этикетки и Честный знак» (ссылка с токеном `#t=…`). Токен проверяется по таблице
+`management_access_tokens` базы сайта, после чего инструмент выдаёт свою сессию на 12 часов (не дольше токена).
+Без неё страница показывает «Доступ закрыт», а проверка кодов не работает.
+
+Устройство как у «Воронки продаж WB»: Node без библиотек и сборки, служба `labels` на `127.0.0.1:3400`,
+папка `/home/ivanc1539/pdf-editor`, nginx-файл `nginx.ssl.conf_labels` (префикс `/management/labels/` nginx убирает).
+
+### Установка (один раз, под root в свежем SSH-терминале)
+
+1. Код и настройки:
+   ```
+   U="runuser -u ivanc1539 --"
+   cd /home/ivanc1539 && $U git clone https://github.com/Mark2803/PDF-Editor.git pdf-editor && cd pdf-editor
+   $U cp .env.example .env
+   DB="$(grep -E '^DATABASE_URL=' /home/ivanc1539/tea-market-v2/backend/.env | cut -d= -f2- | tr -d '"')"
+   SS="$($U node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
+   $U sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DB|; s|^SESSION_SECRET=.*|SESSION_SECRET=$SS|" .env
+   chmod 600 .env && ss -ltnp | grep 3400
+   ```
+   Последняя команда ничего не выводит — порт 3400 свободен.
+2. Служба:
+   ```
+   cp deploy/labels.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now labels
+   sleep 2 && systemctl is-active labels && curl -s http://127.0.0.1:3400/api/me
+   ```
+   Ответ `{"authRequired":true,"authenticated":false}` — работает.
+3. Адрес в nginx:
+   ```
+   cp deploy/nginx-labels.conf /home/ivanc1539/conf/web/tea-master-team.ru/nginx.ssl.conf_labels
+   nginx -t && systemctl reload nginx
+   ```
+4. Карточка в админке появляется после выкладки backend сайта (TeaMarketV2, ветка `рефакторинг`, шаги 1–2 его инструкции).
+
+### Обновление
+
+```
+cd /home/ivanc1539/pdf-editor && runuser -u ivanc1539 -- git pull && systemctl restart labels
+```
+Откат: `runuser -u ivanc1539 -- git checkout -f ПРЕЖНИЙ_КОММИТ && systemctl restart labels`.
+Журнал: `journalctl -u labels -n 50`.
+
+Данные (товары, шаблоны, история кодов) хранятся в браузере того, кто работает, а не на сервере —
+«Резервная копия» в шапке сохраняет их в файл.
+
 ## Файлы
 
 - `index.html`, `style.css`, `app.js`: интерфейс (данные хранятся в IndexedDB браузера).
 - `core.js`: разбор PDF «Честного знака» и сборка PDF.
 - `datamatrix.js`: чтение DataMatrix ECC200 из векторного PDF с проверкой Рида–Соломона.
 - `checker.js`: чтение кодов из PDF/XLSX/CSV, запросы в ЧЗ, разбор статусов.
-- `server.js`, `start.bat`, `start.command`: программа-посредник и запуск.
+- `server.js`, `start.bat`, `start.command`: программа-посредник и запуск; `deploy/`: служба и nginx для сайта; `.env.example`: настройки для сайта.
 - `lib/pdf-lib.min.js`: [pdf-lib](https://github.com/Hopding/pdf-lib) 1.17.1 (MIT).
 - `tests/verify.js`: `npm install && node tests/verify.js коды.pdf шаблон.pdf 1` читает все
   DataMatrix, собирает файлы и сверяет код и номер на каждой странице.

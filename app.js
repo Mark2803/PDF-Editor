@@ -688,7 +688,39 @@
   };
 
   // ---------------- события ----------------
+  // ---------------- вход через «Менеджмент» (только когда страница открыта с сайта) ----------------
+  async function checkAccess() {
+    if (!/^https?:/.test(location.protocol)) return true; // открыто как файл — вход не нужен
+    let me;
+    try {
+      const m = location.hash.match(/(?:^#|&)t=([^&]+)/);
+      if (m) {
+        history.replaceState(null, '', location.pathname + location.search);
+        const r = await fetch('api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: decodeURIComponent(m[1]) }), credentials: 'same-origin' });
+        if (!r.ok) {
+          let msg = 'Не удалось войти.';
+          try { msg = (await r.json()).error.message; } catch (e) { /* нет текста */ }
+          showLock(msg); return false;
+        }
+      }
+      const r = await fetch('api/me', { cache: 'no-store', credentials: 'same-origin' });
+      if (!r.ok) return true; // старый посредник без входа
+      me = await r.json();
+    } catch (e) { return true; }
+    if (me.authRequired && !me.authenticated) { showLock(); return false; }
+    return true;
+  }
+  function showLock(message) {
+    document.querySelectorAll('main, .tabs, .hdr-actions').forEach((el) => { el.hidden = true; });
+    const box = document.createElement('div');
+    box.className = 'card lock';
+    box.innerHTML = `<h2>Доступ закрыт</h2><p>${esc(message || 'Откройте инструмент через админку сайта: «Менеджмент» → PIN → карточка «Этикетки и Честный знак».')}</p>`
+      + '<p><a class="btn" href="/admin/management">Открыть «Менеджмент»</a></p>';
+    document.body.appendChild(box);
+  }
+
   async function init() {
+    if (!(await checkAccess())) return;
     writeZonesToForm();
     writeStyle(DEFAULT_STYLE);
     $('packDate').value = todayIso();

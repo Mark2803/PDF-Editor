@@ -59,3 +59,6 @@ table.results td.code { font-family: ui-monospace, Consolas, monospace; word-bre
 .lvl.ok { background: #e3f5e8; color: #17602c; } .lvl.bad { background: #fde3e3; color: #8a1c1c; }
 .lvl.warn { background: #fff1d6; color: #7a5200; } .lvl.error { background: #eceff3; color: #4a5160; } .lvl.wait { background: #f3f4f6; color: #9aa0aa; }
 .sum { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; } .sum .lvl { font-size: 13px; padding: 5px 12px; }
+
+.lock { max-width: 520px; margin: 60px auto; text-align: center; }
+.lock .btn { text-decoration: none; }
